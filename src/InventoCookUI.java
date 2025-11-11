@@ -14,6 +14,11 @@ import java.awt.event.MouseEvent;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Collections;
+import java.util.Deque;
+import java.util.ArrayDeque;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 
 public class InventoCookUI {
     private JFrame frame;
@@ -23,13 +28,23 @@ public class InventoCookUI {
     private JSpinner quantitySpinner;
     private JButton quantityApplyButton;
 
+    // 임박(near-expiry) 기능용
+    private DefaultTableModel alertModel;
+    private JTable alertTable;
+    private static final int IMMINENT_DAYS = 3; // D-3 이하면 임박으로 간주
+
     private static final Color COLOR_DDAY_SAFE = new Color(230, 248, 230);
     private static final Color COLOR_DDAY_WARNING = new Color(255, 245, 230);
     private static final Color COLOR_DDAY_EXPIRED = new Color(255, 230, 230);
 
+    // 날짜 포맷터 (YYYY-MM-DD)
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
     // 메인 영역 카드 레이아웃 (홈 / 재고관리 / 알림 / 긴급추천)
     private JPanel mainContainer;
     private CardLayout cardLayout;
+    private String currentCard = CARD_HOME;
+    private Deque<String> navStack = new ArrayDeque<>();
 
     private static final String CARD_HOME = "home";
     private static final String CARD_INVENTORY = "inventory";
@@ -170,7 +185,7 @@ public class InventoCookUI {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (cardLayout != null && mainContainer != null && cardName != null) {
-                    cardLayout.show(mainContainer, cardName);
+                    showCard(cardName);
                 }
             }
         });
@@ -188,50 +203,77 @@ public class InventoCookUI {
                 new JLabel("<html><span style='font-size:12pt;font-weight:600;'>식재료 인벤토리</span></html>");
         sectionTitle.setBorder(new EmptyBorder(0, 0, 8, 0));
 
-        // 상단 검색/필터 바 + 액션 버튼
-        JPanel topBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 8));
+        // 상단 검색/필터 바 + 액션 버튼 (작은 화면 대응: 2줄 레이아웃)
+        JPanel topBar = new JPanel();
         topBar.setOpaque(false);
+        topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
+
+        // 1줄차: 검색/필터
+        JPanel filterRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 8));
+        filterRow.setOpaque(false);
         JTextField searchField = new JTextField(12);
         JComboBox<String> categoryFilter = new JComboBox<>(new String[]{"전체", "야채", "육류", "유제품", "기타"});
         JComboBox<String> locationFilter = new JComboBox<>(new String[]{"전체", "냉장", "냉동", "실온"});
         JComboBox<String> sortFilter = new JComboBox<>(new String[]{"정렬 없음", "유통기한", "이름", "카테고리"});
-        topBar.add(new JLabel("검색:"));
-        topBar.add(searchField);
-        topBar.add(new JLabel("카테고리:"));
-        topBar.add(categoryFilter);
-        topBar.add(new JLabel("보관 위치:"));
-        topBar.add(locationFilter);
-        topBar.add(new JLabel("정렬:"));
-        topBar.add(sortFilter);
-        topBar.add(Box.createHorizontalStrut(8));
+
+        filterRow.add(new JLabel("검색:"));
+        filterRow.add(searchField);
+        filterRow.add(new JLabel("카테고리:"));
+        filterRow.add(categoryFilter);
+        filterRow.add(new JLabel("보관 위치:"));
+        filterRow.add(locationFilter);
+        filterRow.add(new JLabel("정렬:"));
+        filterRow.add(sortFilter);
+
+        // 2줄차: 액션 버튼
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        buttonRow.setOpaque(false);
 
         JButton addButton = new JButton("재료 추가");
         styleFlatButton(addButton);
         addButton.addActionListener(e -> onAdd());
-        topBar.add(addButton);
+        buttonRow.add(addButton);
 
         JButton editButton = new JButton("선택 수정");
         styleFlatButton(editButton);
         editButton.addActionListener(e -> onEdit());
-        topBar.add(editButton);
+        buttonRow.add(editButton);
 
         JButton deleteButton = new JButton("선택 삭제");
         styleFlatButton(deleteButton);
         deleteButton.addActionListener(e -> onDelete());
-        topBar.add(deleteButton);
+        buttonRow.add(deleteButton);
+
+        // 상단 바에 두 줄 추가
+        topBar.add(filterRow);
+        topBar.add(buttonRow);
 
         JPanel header = new JPanel(new BorderLayout());
         header.setOpaque(false);
-        header.add(sectionTitle, BorderLayout.NORTH);
+
+        // 상단 라인: 제목 + 뒤로가기
+        JPanel headerTopLine = new JPanel(new BorderLayout());
+        headerTopLine.setOpaque(false);
+        headerTopLine.add(sectionTitle, BorderLayout.WEST);
+
+        JButton backButtonInv = new JButton("← 뒤로");
+        styleFlatButton(backButtonInv);
+        backButtonInv.addActionListener(e -> goBack());
+        JPanel backWrapInv = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        backWrapInv.setOpaque(false);
+        backWrapInv.add(backButtonInv);
+        headerTopLine.add(backWrapInv, BorderLayout.EAST);
+
+        header.add(headerTopLine, BorderLayout.NORTH);
         header.add(topBar, BorderLayout.CENTER);
         main.add(header, BorderLayout.NORTH);
 
         // 테이블
-        String[] columns = {"상태", "재료명", "카테고리", "보관 위치", "수량", "D-Day", "유통기한"};
+        String[] columns = {"재료명", "카테고리", "보관 위치", "수량", "D-Day", "유통기한"};
         Object[][] sample = {
-                {"✅", "계란", "냉장", "냉장", 12, "D-3", "2025-10-28"},
-                {"⚠️", "우유", "유제품", "냉장", 1, "D-1", "2025-10-30"},
-                {"🚫", "두부", "냉장", "냉장", 0, "D+2", "2025-10-26"}
+                {"계란", "냉장", "냉장", 12, "D-3", "2025-10-28"},
+                {"우유", "유제품", "냉장", 1, "D-1", "2025-10-30"},
+                {"두부", "냉장", "냉장", 0, "D+2", "2025-10-26"}
         };
         tableModel = new DefaultTableModel(sample, columns) {
             public boolean isCellEditable(int row, int column) {
@@ -244,8 +286,8 @@ public class InventoCookUI {
                 Component c = super.prepareRenderer(renderer, row, column);
                 try {
                     if (row >= 0 && row < getRowCount()) {
-                        // D-Day 컬럼(인덱스 5)에서 값을 가져와서 전체 행에 색상 적용
-                        Object value = getValueAt(row, 5); // D-Day 컬럼
+                        // D-Day 컬럼(인덱스 4)에서 값을 가져와서 전체 행에 색상 적용 (상태 제거로 인덱스 변경)
+                        Object value = getValueAt(row, 4); // D-Day 컬럼 (상태 제거로 인덱스 변경)
                         String dday = (value != null) ? value.toString() : "";
                         Color bgColor = resolveDDayColor(dday);
                         c.setBackground(bgColor);
@@ -314,16 +356,16 @@ public class InventoCookUI {
             int columnIndex;
             switch (opt) {
                 case "유통기한":
-                    // 모델 컬럼 인덱스 6 = 유통기한
-                    columnIndex = 6;
+                    // 모델 컬럼 인덱스 5 = 유통기한
+                    columnIndex = 5;
                     break;
                 case "이름":
-                    // 모델 컬럼 인덱스 1 = 재료명
-                    columnIndex = 1;
+                    // 모델 컬럼 인덱스 0 = 재료명
+                    columnIndex = 0;
                     break;
                 case "카테고리":
-                    // 모델 컬럼 인덱스 2 = 카테고리
-                    columnIndex = 2;
+                    // 모델 컬럼 인덱스 1 = 카테고리
+                    columnIndex = 1;
                     break;
                 default:
                     sorter.setSortKeys(null);
@@ -356,6 +398,10 @@ public class InventoCookUI {
         bottomBar.add(quantityApplyButton);
         main.add(bottomBar, BorderLayout.SOUTH);
 
+
+        // 실행 시 현재 날짜 기준으로 D-Day 전체 갱신
+        recalculateAllDays();
+
         syncQuantityEditorState();
         return main;
     }
@@ -372,9 +418,9 @@ public class InventoCookUI {
         RowFilter<DefaultTableModel, Integer> filter = new RowFilter<DefaultTableModel, Integer>() {
             @Override
             public boolean include(Entry<? extends DefaultTableModel, ? extends Integer> entry) {
-                String nameVal = entry.getStringValue(1);   // 재료명
-                String catVal = entry.getStringValue(2);    // 카테고리
-                String locVal = entry.getStringValue(3);    // 보관 위치
+                String nameVal = entry.getStringValue(0);   // 재료명
+                String catVal = entry.getStringValue(1);    // 카테고리
+                String locVal = entry.getStringValue(2);    // 보관 위치
 
                 if (!text.isEmpty() && (nameVal == null || !nameVal.toLowerCase().contains(text))) {
                     return false;
@@ -392,20 +438,91 @@ public class InventoCookUI {
         sorter.setRowFilter(filter);
     }
 
-    // 유통기한 알림 화면(임시)
+    // 유통기한 임박/경과 알림 화면
     private JPanel createAlertPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(new EmptyBorder(12, 16, 12, 16));
         panel.setBackground(Color.WHITE);
 
+        // 제목 + 새로고침 버튼
+        JPanel titleBar = new JPanel(new BorderLayout());
+        titleBar.setOpaque(false);
         JLabel title =
-                new JLabel("<html><span style='font-size:12pt;font-weight:600;'>유통기한 임박 알림</span></html>");
+                new JLabel("<html><span style='font-size:12pt;font-weight:600;'>유통기한 임박 알림</span><span style='font-size:10pt;color:#888;'>  (기준: D-" + IMMINENT_DAYS + " 이하)</span></html>");
         title.setBorder(new EmptyBorder(0, 0, 8, 0));
-        panel.add(title, BorderLayout.NORTH);
+        titleBar.add(title, BorderLayout.WEST);
 
-        JLabel placeholder = new JLabel("유통기한이 가까운 재료 목록을 여기에 표시할 예정입니다.");
-        placeholder.setForeground(new Color(120, 120, 120));
-        panel.add(placeholder, BorderLayout.CENTER);
+        JButton backButtonAlert = new JButton("← 뒤로");
+        styleFlatButton(backButtonAlert);
+        backButtonAlert.addActionListener(e -> goBack());
+        JPanel backWrapAlert = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        backWrapAlert.setOpaque(false);
+        backWrapAlert.add(backButtonAlert);
+        titleBar.add(backWrapAlert, BorderLayout.EAST);
+
+        JButton refreshBtn = new JButton("새로고침");
+        styleFlatButton(refreshBtn);
+        refreshBtn.addActionListener(e -> rebuildAlertData());
+        JPanel rightAlert = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        rightAlert.setOpaque(false);
+        rightAlert.add(refreshBtn);
+        rightAlert.add(backButtonAlert);
+        titleBar.add(rightAlert, BorderLayout.EAST);
+
+        panel.add(titleBar, BorderLayout.NORTH);
+
+        // 알림 테이블 (임박/경과 항목만)
+        String[] cols = {"재료명", "유통기한", "D-Day", "수량", "보관 위치", "카테고리"};
+        alertModel = new DefaultTableModel(cols, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        alertTable = new JTable(alertModel) {
+            @Override
+            public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+                Component c = super.prepareRenderer(renderer, row, column);
+                try {
+                    if (row >= 0 && row < getRowCount()) {
+                        Object ddayVal = getValueAt(row, 2); // D-Day
+                        String dday = (ddayVal != null) ? ddayVal.toString() : "";
+                        Color bg = resolveDDayColor(dday);
+                        c.setBackground(bg);
+                        c.setForeground(Color.BLACK);
+                    }
+                } catch (Exception ex) {
+                    c.setBackground(Color.WHITE);
+                    c.setForeground(Color.BLACK);
+                }
+                return c;
+            }
+        };
+        alertTable.setRowHeight(32);
+        alertTable.setFillsViewportHeight(true);
+        alertTable.setShowGrid(false);
+        alertTable.setIntercellSpacing(new Dimension(0, 0));
+        alertTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        alertTable.setSelectionBackground(new Color(235, 245, 255));
+        alertTable.setSelectionForeground(Color.BLACK);
+
+        // 유통기한 오름차순 정렬
+        TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(alertModel);
+        sorter.setComparator(1, (a, b) -> { // 유통기한(YYYY-MM-DD) 비교
+            try {
+                LocalDate la = LocalDate.parse(String.valueOf(a).trim(), DATE_FMT);
+                LocalDate lb = LocalDate.parse(String.valueOf(b).trim(), DATE_FMT);
+                return la.compareTo(lb);
+            } catch (Exception ex) {
+                return String.valueOf(a).compareTo(String.valueOf(b));
+            }
+        });
+        alertTable.setRowSorter(sorter);
+        sorter.setSortKeys(Collections.singletonList(new RowSorter.SortKey(1, SortOrder.ASCENDING)));
+
+        JScrollPane sp = new JScrollPane(alertTable);
+        sp.setBorder(BorderFactory.createLineBorder(new Color(240, 240, 240)));
+        panel.add(sp, BorderLayout.CENTER);
+
+        // 초기 데이터 구성
+        rebuildAlertData();
 
         return panel;
     }
@@ -419,7 +536,20 @@ public class InventoCookUI {
         JLabel title =
                 new JLabel("<html><span style='font-size:12pt;font-weight:600;'>긴급 추천 메뉴</span></html>");
         title.setBorder(new EmptyBorder(0, 0, 8, 0));
-        panel.add(title, BorderLayout.NORTH);
+
+        JPanel topLine = new JPanel(new BorderLayout());
+        topLine.setOpaque(false);
+        topLine.add(title, BorderLayout.WEST);
+
+        JButton backButtonEmg = new JButton("← 뒤로");
+        styleFlatButton(backButtonEmg);
+        backButtonEmg.addActionListener(e -> goBack());
+        JPanel rightEmg = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        rightEmg.setOpaque(false);
+        rightEmg.add(backButtonEmg);
+        topLine.add(rightEmg, BorderLayout.EAST);
+
+        panel.add(topLine, BorderLayout.NORTH);
 
         JLabel placeholder = new JLabel("임박 재료로 만들 수 있는 레시피를 여기에 표시할 예정입니다.");
         placeholder.setForeground(new Color(120, 120, 120));
@@ -458,13 +588,36 @@ public class InventoCookUI {
                 @Override
                 public void mouseClicked(MouseEvent e) {
                     if (cardLayout != null && mainContainer != null) {
-                        cardLayout.show(mainContainer, cardName);
+                        showCard(cardName);
                     }
                 }
             });
         }
 
         return p;
+    }
+
+    // 카드 전환 공통 처리: 이전 카드 히스토리 스택에 저장
+    private void showCard(String cardName) {
+        if (cardLayout == null || mainContainer == null || cardName == null) return;
+        if (currentCard != null && !currentCard.equals(cardName)) {
+            navStack.push(currentCard);
+        }
+        cardLayout.show(mainContainer, cardName);
+        currentCard = cardName;
+    }
+
+    // 뒤로가기: 스택에서 이전 카드 꺼내 전환 (없으면 홈)
+    private void goBack() {
+        if (cardLayout == null || mainContainer == null) return;
+        if (navStack.isEmpty()) {
+            cardLayout.show(mainContainer, CARD_HOME);
+            currentCard = CARD_HOME;
+            return;
+        }
+        String prev = navStack.pop();
+        cardLayout.show(mainContainer, prev);
+        currentCard = prev;
     }
 
     // 버튼 스타일
@@ -479,19 +632,94 @@ public class InventoCookUI {
     private Color resolveDDayColor(String dday) {
         if (dday == null) return Color.WHITE;
         String normalized = dday.trim().toUpperCase();
+
+        // 이미 경과(D+N) or 오늘(D-0)은 빨간색
         if (normalized.startsWith("D+")) return COLOR_DDAY_EXPIRED;
+        if ("D".equals(normalized) || "D0".equals(normalized) || "D-0".equals(normalized)) {
+            return COLOR_DDAY_EXPIRED;
+        }
+
+        // 남은 날(D-N) 규칙: N>=3 초록, N==2|1 노랑
         if (normalized.startsWith("D-")) {
             try {
                 int days = Integer.parseInt(normalized.substring(2));
-                return (days <= 2) ? COLOR_DDAY_WARNING : COLOR_DDAY_SAFE;
+                if (days >= 3) return COLOR_DDAY_SAFE;       // D-3 이상: 초록
+                if (days == 2 || days == 1) return COLOR_DDAY_WARNING; // D-2, D-1: 노랑
+                if (days == 0) return COLOR_DDAY_EXPIRED;    // 안전망
             } catch (NumberFormatException ignored) {
-                return Color.WHITE;
+                // no-op -> fall-through
             }
         }
-        if ("D".equals(normalized) || "D0".equals(normalized) || "D-0".equals(normalized)) {
-            return COLOR_DDAY_WARNING;
-        }
+
         return Color.WHITE;
+    }
+
+    private void recalculateAllDays() {
+        if (tableModel ==  null) return;
+        for (int i = 0; i < tableModel.getRowCount(); i++) {
+            Object expObj = tableModel.getValueAt(i, 5);
+            if (expObj != null) {
+                String exp = expObj.toString().trim();
+                if (!exp.isEmpty()) {
+                    try {
+                        String newDday = calculateDDay(exp);
+                        tableModel.setValueAt(newDday, i, 4);
+                    } catch (Exception e) {
+                        tableModel.setValueAt("D-0", i, 4);
+                    }
+                }
+            }
+        }
+        if (table != null) table.repaint();
+        rebuildAlertData();
+    }
+
+    // expiryStr(YYYY-MM-DD)까지 남은 일수 (오늘 기준, 음수면 경과)
+    private long daysUntil(String expiryStr) {
+        if (expiryStr == null || expiryStr.isBlank()) return Long.MAX_VALUE;
+        try {
+            LocalDate today = LocalDate.now();
+            LocalDate expiry = LocalDate.parse(expiryStr.trim(), DATE_FMT);
+            return ChronoUnit.DAYS.between(today, expiry);
+        } catch (Exception e) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    // 임박(D-IMMINENT_DAYS 이하) 또는 이미 경과한 항목인지 여부
+    private boolean isImminentOrExpired(String expiryStr) {
+        long d = daysUntil(expiryStr);
+        return d <= IMMINENT_DAYS; // d<0(경과)도 포함
+    }
+
+    // 메인 인벤토리 테이블에서 임박/경과 항목을 읽어와 알림 테이블을 갱신
+    private void rebuildAlertData() {
+        if (alertModel == null) return;
+        alertModel.setRowCount(0);
+        if (tableModel == null) return;
+
+        for (int i = 0; i < tableModel.getRowCount(); i++) {
+            String name = String.valueOf(tableModel.getValueAt(i, 0));
+            String cat  = String.valueOf(tableModel.getValueAt(i, 1));
+            String loc  = String.valueOf(tableModel.getValueAt(i, 2));
+            Object qObj = tableModel.getValueAt(i, 3);
+            String dday = String.valueOf(tableModel.getValueAt(i, 4));
+            String exp  = String.valueOf(tableModel.getValueAt(i, 5));
+
+            if (isImminentOrExpired(exp)) {
+                int qty = 0;
+                if (qObj instanceof Number) qty = ((Number) qObj).intValue();
+                else {
+                    try { qty = Integer.parseInt(String.valueOf(qObj)); } catch (Exception ignored) { qty = 0; }
+                }
+                alertModel.addRow(new Object[]{ name, exp, dday, qty, loc, cat });
+            }
+        }
+
+        // 정렬 갱신
+        if (alertTable != null && alertTable.getRowSorter() != null) {
+            alertTable.getRowSorter().allRowsChanged();
+        }
     }
 
     private void applyQuantityChange() {
@@ -504,7 +732,7 @@ public class InventoCookUI {
         int modelRow = table.convertRowIndexToModel(viewRow);
         Object value = quantitySpinner.getValue();
         int qty = (value instanceof Number) ? ((Number) value).intValue() : 0;
-        tableModel.setValueAt(qty, modelRow, 4);
+        tableModel.setValueAt(qty, modelRow, 3);
     }
 
     private void syncQuantityEditorState() {
@@ -515,7 +743,7 @@ public class InventoCookUI {
         quantityApplyButton.setEnabled(hasSelection);
         if (hasSelection) {
             int modelRow = table.convertRowIndexToModel(viewRow);
-            Object current = tableModel.getValueAt(modelRow, 4);
+            Object current = tableModel.getValueAt(modelRow, 3);
             int qty = 0;
             if (current instanceof Number) {
                 qty = ((Number) current).intValue();
@@ -543,16 +771,14 @@ public class InventoCookUI {
             JPanel form = new JPanel(new GridLayout(0, 2, 10, 8));
             form.setBorder(new EmptyBorder(10, 10, 10, 10));
 
-            JComboBox<String> statusField = new JComboBox<>(new String[]{"✅", "⚠️", "🚫"});
             JTextField nameField = new JTextField(20);
             JTextField categoryField = new JTextField(20);
             JComboBox<String> locationField = new JComboBox<>(new String[]{"냉장", "냉동", "실온"});
             JSpinner qtySpinner = new JSpinner(new SpinnerNumberModel(0, 0, 9999, 1));
             JTextField ddayField = new JTextField("D-0", 10);
+            ddayField.setEditable(false); // D-Day는 유통기한 기반 자동 계산
             JTextField expField = new JTextField("2025-10-31", 15);
 
-            form.add(new JLabel("상태:"));
-            form.add(statusField);
             form.add(new JLabel("재료명:"));
             form.add(nameField);
             form.add(new JLabel("카테고리:"));
@@ -565,6 +791,21 @@ public class InventoCookUI {
             form.add(ddayField);
             form.add(new JLabel("유통기한 (YYYY-MM-DD):"));
             form.add(expField);
+
+            // 유통기한 입력에 따라 D-Day 실시간 갱신
+            expField.getDocument().addDocumentListener(new DocumentListener() {
+                private void update() {
+                    String exp = expField.getText().trim();
+                    try {
+                        ddayField.setText(calculateDDay(exp));
+                    } catch (Exception ex) {
+                        ddayField.setText("D-0");
+                    }
+                }
+                @Override public void insertUpdate(DocumentEvent e) { update(); }
+                @Override public void removeUpdate(DocumentEvent e) { update(); }
+                @Override public void changedUpdate(DocumentEvent e) { update(); }
+            });
 
             // 스크롤 가능한 패널로 감싸기
             JScrollPane scrollPane = new JScrollPane(form);
@@ -584,17 +825,20 @@ public class InventoCookUI {
                 }
 
                 int qty = ((Number) qtySpinner.getValue()).intValue();
-                String dday = ddayField.getText().trim();
                 String exp = expField.getText().trim();
+                if (exp.isEmpty()) {
+                    JOptionPane.showMessageDialog(frame, "유통기한(YYYY-MM-DD)을 입력하세요.");
+                    return;
+                }
+                String dday = calculateDDay(exp);
 
                 tableModel.addRow(new Object[]{
-                        statusField.getSelectedItem(),
                         name,
                         categoryField.getText().trim(),
                         locationField.getSelectedItem(),
                         qty,
-                        dday.isEmpty() ? "D-0" : dday,
-                        exp.isEmpty() ? "2025-10-31" : exp
+                        dday,
+                        exp
                 });
 
                 // 테이블 새로고침
@@ -603,6 +847,7 @@ public class InventoCookUI {
                     table.repaint();
                 }
                 refreshBadge();
+                rebuildAlertData();
                 JOptionPane.showMessageDialog(frame, "재료가 추가되었습니다.");
             }
         } catch (Exception e) {
@@ -633,11 +878,10 @@ public class InventoCookUI {
                 return;
             }
 
-            String curStatus = String.valueOf(tableModel.getValueAt(r, 0));
-            String curName = String.valueOf(tableModel.getValueAt(r, 1));
-            String curCat = String.valueOf(tableModel.getValueAt(r, 2));
-            String curLoc = String.valueOf(tableModel.getValueAt(r, 3));
-            Object curQtyObj = tableModel.getValueAt(r, 4);
+            String curName = String.valueOf(tableModel.getValueAt(r, 0));
+            String curCat  = String.valueOf(tableModel.getValueAt(r, 1));
+            String curLoc  = String.valueOf(tableModel.getValueAt(r, 2));
+            Object curQtyObj = tableModel.getValueAt(r, 3);
             int curQty = 0;
             if (curQtyObj instanceof Number) {
                 curQty = ((Number) curQtyObj).intValue();
@@ -648,24 +892,21 @@ public class InventoCookUI {
                     curQty = 0;
                 }
             }
-            String curDday = String.valueOf(tableModel.getValueAt(r, 5));
-            String curExp = String.valueOf(tableModel.getValueAt(r, 6));
+            String curDday = String.valueOf(tableModel.getValueAt(r, 4));
+            String curExp  = String.valueOf(tableModel.getValueAt(r, 5));
 
             JPanel form = new JPanel(new GridLayout(0, 2, 10, 8));
             form.setBorder(new EmptyBorder(10, 10, 10, 10));
 
-            JComboBox<String> statusField = new JComboBox<>(new String[]{"✅", "⚠️", "🚫"});
-            statusField.setSelectedItem(curStatus);
             JTextField nameField = new JTextField(curName, 20);
             JTextField categoryField = new JTextField(curCat, 20);
             JComboBox<String> locationField = new JComboBox<>(new String[]{"냉장", "냉동", "실온"});
             locationField.setSelectedItem(curLoc);
             JSpinner qtySpinner = new JSpinner(new SpinnerNumberModel(curQty, 0, 9999, 1));
             JTextField ddayField = new JTextField(curDday, 10);
+            ddayField.setEditable(false); // 자동 계산 표시만
             JTextField expField = new JTextField(curExp, 15);
 
-            form.add(new JLabel("상태:"));
-            form.add(statusField);
             form.add(new JLabel("재료명:"));
             form.add(nameField);
             form.add(new JLabel("카테고리:"));
@@ -678,6 +919,21 @@ public class InventoCookUI {
             form.add(ddayField);
             form.add(new JLabel("유통기한 (YYYY-MM-DD):"));
             form.add(expField);
+
+            // 유통기한 입력에 따라 D-Day 실시간 갱신
+            expField.getDocument().addDocumentListener(new DocumentListener() {
+                private void update() {
+                    String exp = expField.getText().trim();
+                    try {
+                        ddayField.setText(calculateDDay(exp));
+                    } catch (Exception ex) {
+                        ddayField.setText(curDday);
+                    }
+                }
+                @Override public void insertUpdate(DocumentEvent e) { update(); }
+                @Override public void removeUpdate(DocumentEvent e) { update(); }
+                @Override public void changedUpdate(DocumentEvent e) { update(); }
+            });
 
             // 스크롤 가능한 패널로 감싸기
             JScrollPane scrollPane = new JScrollPane(form);
@@ -697,16 +953,19 @@ public class InventoCookUI {
                 }
 
                 int qty = ((Number) qtySpinner.getValue()).intValue();
-                String dday = ddayField.getText().trim();
                 String exp = expField.getText().trim();
+                if (exp.isEmpty()) {
+                    JOptionPane.showMessageDialog(frame, "유통기한(YYYY-MM-DD)을 입력하세요.");
+                    return;
+                }
+                String dday = calculateDDay(exp);
 
-                tableModel.setValueAt(statusField.getSelectedItem(), r, 0);
-                tableModel.setValueAt(name, r, 1);
-                tableModel.setValueAt(categoryField.getText().trim(), r, 2);
-                tableModel.setValueAt(locationField.getSelectedItem(), r, 3);
-                tableModel.setValueAt(qty, r, 4);
-                tableModel.setValueAt(dday.isEmpty() ? "D-0" : dday, r, 5);
-                tableModel.setValueAt(exp.isEmpty() ? "2025-10-31" : exp, r, 6);
+                tableModel.setValueAt(name, r, 0);
+                tableModel.setValueAt(categoryField.getText().trim(), r, 1);
+                tableModel.setValueAt(locationField.getSelectedItem(), r, 2);
+                tableModel.setValueAt(qty, r, 3);
+                tableModel.setValueAt(dday, r, 4);
+                tableModel.setValueAt(exp, r, 5);
 
                 // 테이블 새로고침
                 tableModel.fireTableDataChanged();
@@ -714,6 +973,7 @@ public class InventoCookUI {
                     table.repaint();
                 }
                 refreshBadge();
+                rebuildAlertData();
                 syncQuantityEditorState();
                 JOptionPane.showMessageDialog(frame, "재료가 수정되었습니다.");
             }
@@ -773,6 +1033,7 @@ public class InventoCookUI {
                 }
                 refreshBadge();
                 syncQuantityEditorState();
+                rebuildAlertData();
 
                 JOptionPane.showMessageDialog(frame,
                         viewRows.length + "개의 재료가 삭제되었습니다.",
@@ -785,21 +1046,19 @@ public class InventoCookUI {
         }
     }
 
-    // 뱃지 갱신 (데모용)
+    // 뱃지 갱신: 임박/경과 재료 개수 표시
     private void refreshBadge() {
         if (tableModel == null || badgeLabel == null) return;
         try {
             int count = 0;
             for (int i = 0; i < tableModel.getRowCount(); i++) {
-                Object value = tableModel.getValueAt(i, 6); // 유통기한 컬럼
-                if (value != null) {
-                    String exp = value.toString();
-                    if (exp.contains("2025-10")) count++;
+                Object value = tableModel.getValueAt(i, 5); // 유통기한 컬럼
+                if (value != null && isImminentOrExpired(String.valueOf(value))) {
+                    count++;
                 }
             }
             badgeLabel.setText("\u26A0 " + count);
         } catch (Exception e) {
-            // 오류 발생 시 기본값 설정
             badgeLabel.setText("\u26A0 0");
         }
     }
@@ -810,5 +1069,16 @@ public class InventoCookUI {
         } catch (Exception ignored) {
         }
         SwingUtilities.invokeLater(InventoCookUI::new);
+    }
+
+    // 유통기한(YYYY-MM-DD) 문자열을 받아 D-Day 문자열(D-?, D+?, D-0)로 계산
+    private String calculateDDay(String expiryStr) {
+        if (expiryStr == null || expiryStr.isBlank()) return "D-0";
+        LocalDate today = LocalDate.now(); // 기준: 오늘
+        LocalDate expiry = LocalDate.parse(expiryStr.trim(), DATE_FMT);
+        long diff = ChronoUnit.DAYS.between(today, expiry); // expiry - today
+        if (diff > 0) return "D-" + diff;
+        if (diff == 0) return "D-0";
+        return "D+" + Math.abs(diff);
     }
 }

@@ -50,3 +50,7 @@ java -cp "out/production/Demo1:lib/*" GanttChartMaker
 
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 3bbc11b (Initial commit)

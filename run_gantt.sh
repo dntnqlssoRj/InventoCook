@@ -22,3 +22,7 @@ fi
 
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 3bbc11b (Initial commit)
