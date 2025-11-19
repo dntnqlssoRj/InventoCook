@@ -1,3 +1,4 @@
+import inventocook.model.Recipe;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
@@ -19,6 +20,14 @@ import java.util.ArrayDeque;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 
 public class InventoCookUI {
     private JFrame frame;
@@ -51,7 +60,18 @@ public class InventoCookUI {
     private static final String CARD_ALERT = "alert";
     private static final String CARD_EMERGENCY = "emergency";
 
+    private DefaultTableModel recipeModel;
+    private JTable recipeTable;
+
+    private List<Recipe> RECIPE_DB = new ArrayList<>();
+
+    private static final String DB_URL = "jdbc:mysql://localhost:3306/inventocook?useSSL=false&serverTimezone=UTC";
+    private static final String DB_USER = "root";
+    private static final String DB_PASS = "wjdgns2003@"; // mysql 비밀번호
+
     public InventoCookUI() {
+        // 레시피를 MySQL DB에서 먼저 로드
+        loadRecipesFromDb();
         initUI();
     }
 
@@ -474,7 +494,10 @@ public class InventoCookUI {
         // 알림 테이블 (임박/경과 항목만)
         String[] cols = {"재료명", "유통기한", "D-Day", "수량", "보관 위치", "카테고리"};
         alertModel = new DefaultTableModel(cols, 0) {
-            @Override public boolean isCellEditable(int r, int c) { return false; }
+            @Override
+            public boolean isCellEditable(int r, int c) {
+                return false;
+            }
         };
         alertTable = new JTable(alertModel) {
             @Override
@@ -527,33 +550,92 @@ public class InventoCookUI {
         return panel;
     }
 
-    // 긴급 추천 메뉴 화면(임시)
+    // 긴급 추천 메뉴 화면
     private JPanel createEmergencyPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(new EmptyBorder(12, 16, 12, 16));
         panel.setBackground(Color.WHITE);
 
+        // 상단 타이틀 + 버튼
         JLabel title =
-                new JLabel("<html><span style='font-size:12pt;font-weight:600;'>긴급 추천 메뉴</span></html>");
+                new JLabel("<html><span style='font-size:12pt;font-weight:600;'>긴급 추천 메뉴</span><span style='font-size:10pt;color:#888;'>  (임박 재료 우선)</span></html>");
         title.setBorder(new EmptyBorder(0, 0, 8, 0));
 
         JPanel topLine = new JPanel(new BorderLayout());
         topLine.setOpaque(false);
         topLine.add(title, BorderLayout.WEST);
 
+        // 오른쪽: 새로고침 + 뒤로
+        JButton refreshBtn = new JButton("새로고침");
+        styleFlatButton(refreshBtn);
+        refreshBtn.addActionListener(e -> rebuildRecipeRecommendations());
+
         JButton backButtonEmg = new JButton("← 뒤로");
         styleFlatButton(backButtonEmg);
         backButtonEmg.addActionListener(e -> goBack());
-        JPanel rightEmg = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+
+        JPanel rightEmg = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         rightEmg.setOpaque(false);
+        rightEmg.add(refreshBtn);
         rightEmg.add(backButtonEmg);
         topLine.add(rightEmg, BorderLayout.EAST);
 
         panel.add(topLine, BorderLayout.NORTH);
 
-        JLabel placeholder = new JLabel("임박 재료로 만들 수 있는 레시피를 여기에 표시할 예정입니다.");
-        placeholder.setForeground(new Color(120, 120, 120));
-        panel.add(placeholder, BorderLayout.CENTER);
+        // 레시피 추천 테이블
+        String[] cols = {"레시피명", "보유/필요 재료", "임박 재료 수", "부족 재료 수", "설명"};
+        recipeModel = new DefaultTableModel(cols, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+
+        recipeTable = new JTable(recipeModel);
+        recipeTable.setRowHeight(32);
+        recipeTable.setFillsViewportHeight(true);
+        recipeTable.setShowGrid(false);
+        recipeTable.setIntercellSpacing(new Dimension(0, 0));
+        recipeTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        recipeTable.setSelectionBackground(new Color(235, 245, 255));
+        recipeTable.setSelectionForeground(Color.BLACK);
+
+        JScrollPane sp = new JScrollPane(recipeTable);
+        sp.setBorder(BorderFactory.createLineBorder(new Color(240, 240, 240)));
+        panel.add(sp, BorderLayout.CENTER);
+
+        // 레시피 더블클릭 시 상세 정보 팝업
+        recipeTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2 && recipeTable.getSelectedRow() >= 0) {
+                    int viewRow = recipeTable.getSelectedRow();
+                    String recipeName = String.valueOf(recipeTable.getValueAt(viewRow, 0));
+                    Recipe target = null;
+                    for (Recipe r : RECIPE_DB) {
+                        if (r.getName().equals(recipeName)) {
+                            target = r;
+                            break;
+                        }
+                    }
+                    if (target != null) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("필요 재료:\n");
+                        for (String ing : target.getIngredients()) {
+                            boolean has = hasIngredient(ing);
+                            sb.append("- ").append(ing);
+                            if (has) sb.append(" (보유 중)");
+                            sb.append("\n");
+                        }
+                        JOptionPane.showMessageDialog(frame, sb.toString(), target.getName(),
+                                JOptionPane.INFORMATION_MESSAGE);
+                    }
+                }
+            }
+        });
+
+        // 초기 추천 목록 구성
+        rebuildRecipeRecommendations();
 
         return panel;
     }
@@ -655,7 +737,7 @@ public class InventoCookUI {
     }
 
     private void recalculateAllDays() {
-        if (tableModel ==  null) return;
+        if (tableModel == null) return;
         for (int i = 0; i < tableModel.getRowCount(); i++) {
             Object expObj = tableModel.getValueAt(i, 5);
             if (expObj != null) {
@@ -672,6 +754,7 @@ public class InventoCookUI {
         }
         if (table != null) table.repaint();
         rebuildAlertData();
+        rebuildRecipeRecommendations();
     }
 
     // expiryStr(YYYY-MM-DD)까지 남은 일수 (오늘 기준, 음수면 경과)
@@ -700,19 +783,23 @@ public class InventoCookUI {
 
         for (int i = 0; i < tableModel.getRowCount(); i++) {
             String name = String.valueOf(tableModel.getValueAt(i, 0));
-            String cat  = String.valueOf(tableModel.getValueAt(i, 1));
-            String loc  = String.valueOf(tableModel.getValueAt(i, 2));
+            String cat = String.valueOf(tableModel.getValueAt(i, 1));
+            String loc = String.valueOf(tableModel.getValueAt(i, 2));
             Object qObj = tableModel.getValueAt(i, 3);
             String dday = String.valueOf(tableModel.getValueAt(i, 4));
-            String exp  = String.valueOf(tableModel.getValueAt(i, 5));
+            String exp = String.valueOf(tableModel.getValueAt(i, 5));
 
             if (isImminentOrExpired(exp)) {
                 int qty = 0;
                 if (qObj instanceof Number) qty = ((Number) qObj).intValue();
                 else {
-                    try { qty = Integer.parseInt(String.valueOf(qObj)); } catch (Exception ignored) { qty = 0; }
+                    try {
+                        qty = Integer.parseInt(String.valueOf(qObj));
+                    } catch (Exception ignored) {
+                        qty = 0;
+                    }
                 }
-                alertModel.addRow(new Object[]{ name, exp, dday, qty, loc, cat });
+                alertModel.addRow(new Object[]{name, exp, dday, qty, loc, cat});
             }
         }
 
@@ -802,9 +889,21 @@ public class InventoCookUI {
                         ddayField.setText("D-0");
                     }
                 }
-                @Override public void insertUpdate(DocumentEvent e) { update(); }
-                @Override public void removeUpdate(DocumentEvent e) { update(); }
-                @Override public void changedUpdate(DocumentEvent e) { update(); }
+
+                @Override
+                public void insertUpdate(DocumentEvent e) {
+                    update();
+                }
+
+                @Override
+                public void removeUpdate(DocumentEvent e) {
+                    update();
+                }
+
+                @Override
+                public void changedUpdate(DocumentEvent e) {
+                    update();
+                }
             });
 
             // 스크롤 가능한 패널로 감싸기
@@ -848,6 +947,7 @@ public class InventoCookUI {
                 }
                 refreshBadge();
                 rebuildAlertData();
+                rebuildRecipeRecommendations();
                 JOptionPane.showMessageDialog(frame, "재료가 추가되었습니다.");
             }
         } catch (Exception e) {
@@ -879,8 +979,8 @@ public class InventoCookUI {
             }
 
             String curName = String.valueOf(tableModel.getValueAt(r, 0));
-            String curCat  = String.valueOf(tableModel.getValueAt(r, 1));
-            String curLoc  = String.valueOf(tableModel.getValueAt(r, 2));
+            String curCat = String.valueOf(tableModel.getValueAt(r, 1));
+            String curLoc = String.valueOf(tableModel.getValueAt(r, 2));
             Object curQtyObj = tableModel.getValueAt(r, 3);
             int curQty = 0;
             if (curQtyObj instanceof Number) {
@@ -893,7 +993,7 @@ public class InventoCookUI {
                 }
             }
             String curDday = String.valueOf(tableModel.getValueAt(r, 4));
-            String curExp  = String.valueOf(tableModel.getValueAt(r, 5));
+            String curExp = String.valueOf(tableModel.getValueAt(r, 5));
 
             JPanel form = new JPanel(new GridLayout(0, 2, 10, 8));
             form.setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -930,9 +1030,21 @@ public class InventoCookUI {
                         ddayField.setText(curDday);
                     }
                 }
-                @Override public void insertUpdate(DocumentEvent e) { update(); }
-                @Override public void removeUpdate(DocumentEvent e) { update(); }
-                @Override public void changedUpdate(DocumentEvent e) { update(); }
+
+                @Override
+                public void insertUpdate(DocumentEvent e) {
+                    update();
+                }
+
+                @Override
+                public void removeUpdate(DocumentEvent e) {
+                    update();
+                }
+
+                @Override
+                public void changedUpdate(DocumentEvent e) {
+                    update();
+                }
             });
 
             // 스크롤 가능한 패널로 감싸기
@@ -975,6 +1087,7 @@ public class InventoCookUI {
                 refreshBadge();
                 rebuildAlertData();
                 syncQuantityEditorState();
+                rebuildRecipeRecommendations();
                 JOptionPane.showMessageDialog(frame, "재료가 수정되었습니다.");
             }
         } catch (Exception e) {
@@ -1034,6 +1147,7 @@ public class InventoCookUI {
                 refreshBadge();
                 syncQuantityEditorState();
                 rebuildAlertData();
+                rebuildRecipeRecommendations();
 
                 JOptionPane.showMessageDialog(frame,
                         viewRows.length + "개의 재료가 삭제되었습니다.",
@@ -1080,5 +1194,193 @@ public class InventoCookUI {
         if (diff > 0) return "D-" + diff;
         if (diff == 0) return "D-0";
         return "D+" + Math.abs(diff);
+    }
+
+    // 현재 인벤토리 상태를 기반으로 레시피 추천 목록을 다시 계산
+    private void rebuildRecipeRecommendations() {
+        if (recipeModel == null) return;
+        recipeModel.setRowCount(0);
+        if (tableModel == null || RECIPE_DB == null || RECIPE_DB.isEmpty()) return;
+
+        List<RecipeMatch> matches = new ArrayList<>();
+
+        for (Recipe recipe : RECIPE_DB) {
+            int have = 0;
+            int imminent = 0;
+            int missing = 0;
+
+            for (String ing : recipe.getIngredients()) {
+                boolean has = false;
+                boolean isImminent = false;
+
+                // 인벤토리에서 해당 재료 검색 (이름 완전 일치, 대소문자 무시)
+                for (int i = 0; i < tableModel.getRowCount(); i++) {
+                    String name = String.valueOf(tableModel.getValueAt(i, 0));
+                    if (name != null && name.trim().equalsIgnoreCase(ing.trim())) {
+                        // 수량 체크
+                        Object qObj = tableModel.getValueAt(i, 3);
+                        int qty = 0;
+                        if (qObj instanceof Number) {
+                            qty = ((Number) qObj).intValue();
+                        } else if (qObj != null) {
+                            try {
+                                qty = Integer.parseInt(String.valueOf(qObj));
+                            } catch (NumberFormatException ignored) {
+                                qty = 0;
+                            }
+                        }
+                        if (qty > 0) {
+                            has = true;
+                            Object expObj = tableModel.getValueAt(i, 5);
+                            String exp = (expObj != null) ? String.valueOf(expObj) : null;
+                            if (isImminentOrExpired(exp)) {
+                                isImminent = true;
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                if (has) {
+                    have++;
+                    if (isImminent) imminent++;
+                } else {
+                    missing++;
+                }
+            }
+
+            // 현재 재료와 전혀 겹치지 않는 레시피는 제외
+            if (have == 0) continue;
+
+            RecipeMatch match = new RecipeMatch(recipe, have, imminent, missing);
+            matches.add(match);
+        }
+
+        // 추천 점수 높은 순으로 정렬
+        matches.sort((a, b) -> Integer.compare(b.score, a.score));
+
+        for (RecipeMatch m : matches) {
+            String haveInfo = m.haveCount + " / " + m.recipe.getIngredients().size();
+            recipeModel.addRow(new Object[]{
+                    m.recipe.getName(),
+                    haveInfo,
+                    m.imminentCount,
+                    m.missingCount,
+                    m.recipe.getDescription()
+            });
+        }
+    }
+
+    // 인벤토리에 해당 재료가 있는지 단순 체크
+    private boolean hasIngredient(String ingredientName) {
+        if (tableModel == null || ingredientName == null) return false;
+        for (int i = 0; i < tableModel.getRowCount(); i++) {
+            String name = String.valueOf(tableModel.getValueAt(i, 0));
+            if (name != null && name.trim().equalsIgnoreCase(ingredientName.trim())) {
+                Object qObj = tableModel.getValueAt(i, 3);
+                int qty = 0;
+                if (qObj instanceof Number) {
+                    qty = ((Number) qObj).intValue();
+                } else if (qObj != null) {
+                    try {
+                        qty = Integer.parseInt(String.valueOf(qObj));
+                    } catch (NumberFormatException ignored) {
+                        qty = 0;
+                    }
+                }
+                return qty > 0;
+            }
+        }
+        return false;
+    }
+
+    // MySQL에서 레시피 + 재료 목록을 로딩
+    private void loadRecipesFromDb() {
+        RECIPE_DB.clear();
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+
+        try {
+            conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+            String sql =
+                    "SELECT r.name, r.description, i.name AS ingredient_name " +
+                            "FROM recipes r " +
+                            "LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id " +
+                            "LEFT JOIN ingredients i ON i.id = ri.ingredient_id " +
+                            "ORDER BY r.name";
+            ps = conn.prepareStatement(sql);
+            rs = ps.executeQuery();
+
+            Map<String, TempRecipe> tempMap = new LinkedHashMap<>();
+            while (rs.next()) {
+                String name = rs.getString("name");
+                String desc = rs.getString("description");
+                String ingName = rs.getString("ingredient_name");
+
+                TempRecipe temp = tempMap.get(name);
+                if (temp == null) {
+                    temp = new TempRecipe(desc);
+                    tempMap.put(name, temp);
+                }
+                if (ingName != null && !ingName.isBlank()) {
+                    temp.ingredients.add(ingName.trim());
+                }
+            }
+
+            for (Map.Entry<String, TempRecipe> entry : tempMap.entrySet()) {
+                String name = entry.getKey();
+                TempRecipe t = entry.getValue();
+                RECIPE_DB.add(new Recipe(name, t.ingredients, t.description));
+            }
+
+            System.out.println("레시피 로딩 완료: " + RECIPE_DB.size() + "개");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+            } catch (SQLException ignored) {}
+            try {
+                if (ps != null) ps.close();
+            } catch (SQLException ignored) {}
+            try {
+                if (conn != null) conn.close();
+            } catch (SQLException ignored) {}
+        }
+
+        // DB에 아무 것도 없으면, 기본 샘플 레시피를 하나 넣어준다 (옵션)
+        if (RECIPE_DB.isEmpty()) {
+            List<String> ings = new ArrayList<>(Arrays.asList("계란", "밥", "대파"));
+            RECIPE_DB.add(new Recipe("샘플 계란볶음밥", ings, "DB가 비어 있을 때 표시되는 샘플 레시피입니다."));
+        }
+    }
+
+    // DB 로딩용 임시 레시피 구조체
+    private static class TempRecipe {
+        final String description;
+        final List<String> ingredients = new ArrayList<>();
+
+        TempRecipe(String description) {
+            this.description = description;
+        }
+    }
+
+    // 레시피와 매칭 점수
+    private static class RecipeMatch {
+        final Recipe recipe;
+        final int haveCount;
+        final int imminentCount;
+        final int missingCount;
+        final int score;
+
+        RecipeMatch(Recipe recipe, int haveCount, int imminentCount, int missingCount) {
+            this.recipe = recipe;
+            this.haveCount = haveCount;
+            this.imminentCount = imminentCount;
+            this.missingCount = missingCount;
+            // 임박 재료를 많이 쓸수록, 그리고 보유 재료를 많이 쓸수록 점수 상승
+            this.score = imminentCount * 10 + haveCount;
+        }
     }
 }

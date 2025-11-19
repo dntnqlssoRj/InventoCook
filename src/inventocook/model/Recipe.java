@@ -3,14 +3,26 @@ package inventocook.model;
 import java.util.List;
 
 public class Recipe {
-    public String title;
-    public List<String> ingredients;
-    public String instructions;
+    private final String name;
+    private final List<String> ingredients;
+    private final String description;
 
-    public Recipe(String title, List<String> ingredients, String instructions) {
-        this.title = title;
+    public Recipe(String name, List<String> ingredients, String description) {
+        this.name = name;
         this.ingredients = ingredients;
-        this.instructions = instructions;
+        this.description = description;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public List<String> getIngredients() {
+        return ingredients;
+    }
+
+    public String getDescription() {
+        return description;
     }
 }
 
