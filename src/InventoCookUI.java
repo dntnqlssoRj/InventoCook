@@ -62,6 +62,7 @@ public class InventoCookUI {
 
     private DefaultTableModel recipeModel;
     private JTable recipeTable;
+    private JLabel topRecipeLabel;
 
     private List<Recipe> RECIPE_DB = new ArrayList<>();
 
@@ -558,8 +559,8 @@ public class InventoCookUI {
 
         // 상단 타이틀 + 버튼
         JLabel title =
-                new JLabel("<html><span style='font-size:12pt;font-weight:600;'>긴급 추천 메뉴</span><span style='font-size:10pt;color:#888;'>  (임박 재료 우선)</span></html>");
-        title.setBorder(new EmptyBorder(0, 0, 8, 0));
+                new JLabel("<html><span style='font-size:12pt;font-weight:600;'>긴급 추천 메뉴</span><span style='font-size:10pt;color:#888;'>  (임박 재료 + 매칭률 우선)</span></html>");
+        title.setBorder(new EmptyBorder(0, 0, 4, 0));
 
         JPanel topLine = new JPanel(new BorderLayout());
         topLine.setOpaque(false);
@@ -568,7 +569,6 @@ public class InventoCookUI {
         // 오른쪽: 새로고침 + 뒤로
         JButton refreshBtn = new JButton("새로고침");
         styleFlatButton(refreshBtn);
-        refreshBtn.addActionListener(e -> rebuildRecipeRecommendations());
 
         JButton backButtonEmg = new JButton("← 뒤로");
         styleFlatButton(backButtonEmg);
@@ -580,14 +580,49 @@ public class InventoCookUI {
         rightEmg.add(backButtonEmg);
         topLine.add(rightEmg, BorderLayout.EAST);
 
-        panel.add(topLine, BorderLayout.NORTH);
+        // 검색/카테고리 필터 바
+        JPanel filterBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        filterBar.setOpaque(false);
+        JTextField recipeSearchField = new JTextField(16);
+        JComboBox<String> recipeCategoryFilter = new JComboBox<>(new String[]{
+                "전체", "볶음밥/덮밥", "국/찌개", "면/파스타", "반찬", "기타"
+        });
 
-        // 레시피 추천 테이블
-        String[] cols = {"레시피명", "보유/필요 재료", "임박 재료 수", "부족 재료 수", "설명"};
+        filterBar.add(new JLabel("레시피 검색:"));
+        filterBar.add(recipeSearchField);
+        filterBar.add(new JLabel("카테고리:"));
+        filterBar.add(recipeCategoryFilter);
+
+        JPanel header = new JPanel(new BorderLayout());
+        header.setOpaque(false);
+        header.add(topLine, BorderLayout.NORTH);
+        header.add(filterBar, BorderLayout.CENTER);
+
+        // 상단 추천 레시피 하이라이트 영역
+        topRecipeLabel = new JLabel("현재 인벤토리 기준 상위 추천 레시피가 여기 표시됩니다.");
+        topRecipeLabel.setBorder(new EmptyBorder(4, 0, 4, 0));
+        JPanel highlightPanel = new JPanel(new BorderLayout());
+        highlightPanel.setOpaque(false);
+        highlightPanel.add(topRecipeLabel, BorderLayout.WEST);
+        header.add(highlightPanel, BorderLayout.SOUTH);
+
+        panel.add(header, BorderLayout.NORTH);
+
+        // 레시피 추천 테이블 (전체 레시피 + 매칭률 기반 정렬)
+        String[] cols = {"레시피명", "카테고리", "매칭률(%)", "보유/필요 재료", "임박 재료 수", "부족 재료 수", "설명"};
         recipeModel = new DefaultTableModel(cols, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
+            }
+
+            @Override
+            public Class<?> getColumnClass(int columnIndex) {
+                // 매칭률 컬럼은 숫자 정렬을 위해 Integer 사용
+                if (columnIndex == 2) {
+                    return Integer.class;
+                }
+                return super.getColumnClass(columnIndex);
             }
         };
 
@@ -604,13 +639,70 @@ public class InventoCookUI {
         sp.setBorder(BorderFactory.createLineBorder(new Color(240, 240, 240)));
         panel.add(sp, BorderLayout.CENTER);
 
+        // 테이블 정렬/검색/필터를 위한 RowSorter
+        TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(recipeModel);
+        recipeTable.setRowSorter(sorter);
+
+        Runnable applyRecipeFilter = () -> {
+            String text = recipeSearchField.getText() != null
+                    ? recipeSearchField.getText().trim().toLowerCase()
+                    : "";
+            String category = (String) recipeCategoryFilter.getSelectedItem();
+
+            RowFilter<DefaultTableModel, Integer> filter = new RowFilter<DefaultTableModel, Integer>() {
+                @Override
+                public boolean include(Entry<? extends DefaultTableModel, ? extends Integer> entry) {
+                    String nameVal = String.valueOf(entry.getValue(0));  // 레시피명
+                    String catVal = String.valueOf(entry.getValue(1));   // 카테고리
+
+                    if (!text.isEmpty()) {
+                        if (nameVal == null || !nameVal.toLowerCase().contains(text)) {
+                            return false;
+                        }
+                    }
+                    if (category != null && !"전체".equals(category)) {
+                        if (catVal == null || !catVal.equals(category)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+            };
+            sorter.setRowFilter(filter);
+        };
+
+        // 검색창 입력 시 필터 적용
+        recipeSearchField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                applyRecipeFilter.run();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                applyRecipeFilter.run();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                applyRecipeFilter.run();
+            }
+        });
+
+        // 카테고리 변경 시 필터 적용
+        recipeCategoryFilter.addActionListener(e -> applyRecipeFilter.run());
+
+        // 새로고침 버튼: 매칭률/임박 재계산
+        refreshBtn.addActionListener(e -> rebuildRecipeRecommendations());
+
         // 레시피 더블클릭 시 상세 정보 팝업
         recipeTable.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2 && recipeTable.getSelectedRow() >= 0) {
                     int viewRow = recipeTable.getSelectedRow();
-                    String recipeName = String.valueOf(recipeTable.getValueAt(viewRow, 0));
+                    int modelRow = recipeTable.convertRowIndexToModel(viewRow);
+                    String recipeName = String.valueOf(recipeTable.getModel().getValueAt(modelRow, 0));
                     Recipe target = null;
                     for (Recipe r : RECIPE_DB) {
                         if (r.getName().equals(recipeName)) {
@@ -634,8 +726,13 @@ public class InventoCookUI {
             }
         });
 
-        // 초기 추천 목록 구성
+        // 초기 추천 목록 구성 (전체 레시피 + 매칭률)
         rebuildRecipeRecommendations();
+
+        // 기본 정렬: 매칭률(%) 기준 내림차순
+        List<RowSorter.SortKey> sortKeys =
+                Collections.singletonList(new RowSorter.SortKey(2, SortOrder.DESCENDING));
+        sorter.setSortKeys(sortKeys);
 
         return panel;
     }
@@ -1209,66 +1306,123 @@ public class InventoCookUI {
             int imminent = 0;
             int missing = 0;
 
-            for (String ing : recipe.getIngredients()) {
-                boolean has = false;
-                boolean isImminent = false;
+            List<String> ingredients = recipe.getIngredients();
+            int total = (ingredients != null) ? ingredients.size() : 0;
 
-                // 인벤토리에서 해당 재료 검색 (이름 완전 일치, 대소문자 무시)
-                for (int i = 0; i < tableModel.getRowCount(); i++) {
-                    String name = String.valueOf(tableModel.getValueAt(i, 0));
-                    if (name != null && name.trim().equalsIgnoreCase(ing.trim())) {
-                        // 수량 체크
-                        Object qObj = tableModel.getValueAt(i, 3);
-                        int qty = 0;
-                        if (qObj instanceof Number) {
-                            qty = ((Number) qObj).intValue();
-                        } else if (qObj != null) {
-                            try {
-                                qty = Integer.parseInt(String.valueOf(qObj));
-                            } catch (NumberFormatException ignored) {
-                                qty = 0;
+            if (ingredients != null) {
+                for (String ing : ingredients) {
+                    boolean has = false;
+                    boolean isImminent = false;
+
+                    // 인벤토리에서 해당 재료 검색 (이름 완전 일치, 대소문자 무시)
+                    for (int i = 0; i < tableModel.getRowCount(); i++) {
+                        String name = String.valueOf(tableModel.getValueAt(i, 0));
+                        if (name != null && name.trim().equalsIgnoreCase(ing.trim())) {
+                            // 수량 체크
+                            Object qObj = tableModel.getValueAt(i, 3);
+                            int qty = 0;
+                            if (qObj instanceof Number) {
+                                qty = ((Number) qObj).intValue();
+                            } else if (qObj != null) {
+                                try {
+                                    qty = Integer.parseInt(String.valueOf(qObj));
+                                } catch (NumberFormatException ignored) {
+                                    qty = 0;
+                                }
                             }
-                        }
-                        if (qty > 0) {
-                            has = true;
-                            Object expObj = tableModel.getValueAt(i, 5);
-                            String exp = (expObj != null) ? String.valueOf(expObj) : null;
-                            if (isImminentOrExpired(exp)) {
-                                isImminent = true;
+                            if (qty > 0) {
+                                has = true;
+                                Object expObj = tableModel.getValueAt(i, 5);
+                                String exp = (expObj != null) ? String.valueOf(expObj) : null;
+                                if (isImminentOrExpired(exp)) {
+                                    isImminent = true;
+                                }
                             }
+                            break;
                         }
-                        break;
                     }
-                }
 
-                if (has) {
-                    have++;
-                    if (isImminent) imminent++;
-                } else {
-                    missing++;
+                    if (has) {
+                        have++;
+                        if (isImminent) imminent++;
+                    } else {
+                        missing++;
+                    }
                 }
             }
 
-            // 현재 재료와 전혀 겹치지 않는 레시피는 제외
-            if (have == 0) continue;
+            int matchPercent = 0;
+            if (total > 0) {
+                matchPercent = (int) Math.round((have * 100.0) / total);
+            }
 
-            RecipeMatch match = new RecipeMatch(recipe, have, imminent, missing);
+            RecipeMatch match = new RecipeMatch(recipe, have, imminent, missing, matchPercent);
             matches.add(match);
         }
 
-        // 추천 점수 높은 순으로 정렬
-        matches.sort((a, b) -> Integer.compare(b.score, a.score));
+        // 매칭률 우선, 그 다음 임박 재료가 많은 순으로 정렬
+        matches.sort((a, b) -> {
+            int cmp = Integer.compare(b.matchPercent, a.matchPercent);
+            if (cmp != 0) return cmp;
+            return Integer.compare(b.score, a.score);
+        });
+
+        // 상단 하이라이트 라벨 업데이트 (최상위 추천 1개 기준)
+        if (topRecipeLabel != null) {
+            if (!matches.isEmpty()) {
+                RecipeMatch top = matches.get(0);
+                int totalCount = (top.recipe.getIngredients() != null)
+                        ? top.recipe.getIngredients().size()
+                        : 0;
+                String labelText = String.format(
+                        "<html><span style='font-size:10pt;color:#333;'>현재 최상위 추천:</span> " +
+                                "<span style='font-weight:600;'>%s</span> " +
+                                "<span style='font-size:9pt;color:#666;'>(매칭률 %d%%, 보유 %d / %d, 임박 %d개)</span></html>",
+                        top.recipe.getName(),
+                        top.matchPercent,
+                        top.haveCount,
+                        totalCount,
+                        top.imminentCount
+                );
+                topRecipeLabel.setText(labelText);
+            } else {
+                topRecipeLabel.setText("표시할 레시피가 없습니다.");
+            }
+        }
 
         for (RecipeMatch m : matches) {
-            String haveInfo = m.haveCount + " / " + m.recipe.getIngredients().size();
+            String category = inferRecipeCategory(m.recipe.getName());
+            String haveInfo = m.haveCount + " / " + (m.recipe.getIngredients() != null ? m.recipe.getIngredients().size() : 0);
             recipeModel.addRow(new Object[]{
                     m.recipe.getName(),
+                    category,
+                    m.matchPercent,
                     haveInfo,
                     m.imminentCount,
                     m.missingCount,
                     m.recipe.getDescription()
             });
         }
+    }
+
+    // 레시피 이름 기반 간단 카테고리 분류
+    private String inferRecipeCategory(String recipeName) {
+        if (recipeName == null) return "기타";
+        String n = recipeName;
+
+        if (n.contains("볶음밥") || n.contains("덮밥")) {
+            return "볶음밥/덮밥";
+        }
+        if (n.contains("국") || n.contains("찌개") || n.contains("탕")) {
+            return "국/찌개";
+        }
+        if (n.contains("파스타") || n.contains("우동") || n.contains("국수") || n.contains("라면")) {
+            return "면/파스타";
+        }
+        if (n.contains("전") || n.contains("볶음") || n.contains("조림") || n.contains("나물") || n.contains("무침")) {
+            return "반찬";
+        }
+        return "기타";
     }
 
     // 인벤토리에 해당 재료가 있는지 단순 체크
@@ -1372,14 +1526,16 @@ public class InventoCookUI {
         final int haveCount;
         final int imminentCount;
         final int missingCount;
+        final int matchPercent;
         final int score;
 
-        RecipeMatch(Recipe recipe, int haveCount, int imminentCount, int missingCount) {
+        RecipeMatch(Recipe recipe, int haveCount, int imminentCount, int missingCount, int matchPercent) {
             this.recipe = recipe;
             this.haveCount = haveCount;
             this.imminentCount = imminentCount;
             this.missingCount = missingCount;
-            // 임박 재료를 많이 쓸수록, 그리고 보유 재료를 많이 쓸수록 점수 상승
+            this.matchPercent = matchPercent;
+            // 임박 재료와 보유 재료를 약간 가중치로 더 반영
             this.score = imminentCount * 10 + haveCount;
         }
     }
