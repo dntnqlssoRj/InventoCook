@@ -4,6 +4,7 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableRowSorter;
+import javax.swing.table.TableColumnModel;
 import javax.swing.RowFilter;
 import javax.swing.RowSorter;
 import javax.swing.SortOrder;
@@ -67,8 +68,8 @@ public class InventoCookUI {
     private List<Recipe> RECIPE_DB = new ArrayList<>();
 
     private static final String DB_URL = "jdbc:mysql://localhost:3306/inventocook?useSSL=false&serverTimezone=UTC";
-    private static final String DB_USER =  //"본인계정"
-    private static final String DB_PASS =  //"본인비밀번호" 
+    private static final String DB_USER =  "root"; //"본인계정"
+    private static final String DB_PASS =  "wjdgns2003@"; //"본인비밀번호"
 
     public InventoCookUI() {
         // 레시피를 MySQL DB에서 먼저 로드
@@ -291,12 +292,8 @@ public class InventoCookUI {
 
         // 테이블
         String[] columns = {"재료명", "카테고리", "보관 위치", "수량", "D-Day", "유통기한"};
-        Object[][] sample = {
-                {"계란", "냉장", "냉장", 12, "D-3", "2025-10-28"},
-                {"우유", "유제품", "냉장", 1, "D-1", "2025-10-30"},
-                {"두부", "냉장", "냉장", 0, "D+2", "2025-10-26"}
-        };
-        tableModel = new DefaultTableModel(sample, columns) {
+        tableModel = new DefaultTableModel(columns, 0) {
+            @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
@@ -342,6 +339,11 @@ public class InventoCookUI {
         table.setRowSorter(sorter);
 
         Runnable apply = () -> applyFilters(sorter, searchField, categoryFilter, locationFilter);
+
+        // DB에서 인벤토리 로딩
+        loadInventoryFromDb();
+        // 로딩 후 필터/정렬 다시 적용
+        apply.run();
 
         // 검색창 입력 시 필터 적용
         searchField.getDocument().addDocumentListener(new DocumentListener() {
@@ -609,7 +611,7 @@ public class InventoCookUI {
         panel.add(header, BorderLayout.NORTH);
 
         // 레시피 추천 테이블 (전체 레시피 + 매칭률 기반 정렬)
-        String[] cols = {"레시피명", "카테고리", "매칭률(%)", "보유/필요 재료", "임박 재료 수", "부족 재료 수", "설명"};
+        String[] cols = {"레시피명", "카테고리", "매칭률(%)", "보유 재료 수", "필요 재료 수", "임박 재료 수", "부족 재료 수", "설명"};
         recipeModel = new DefaultTableModel(cols, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -618,15 +620,29 @@ public class InventoCookUI {
 
             @Override
             public Class<?> getColumnClass(int columnIndex) {
-                // 매칭률 컬럼은 숫자 정렬을 위해 Integer 사용
-                if (columnIndex == 2) {
+                // 매칭률과 수량 관련 컬럼은 숫자 정렬을 위해 Integer 사용
+                if (columnIndex >= 2 && columnIndex <= 6) {
                     return Integer.class;
                 }
                 return super.getColumnClass(columnIndex);
             }
         };
 
-        recipeTable = new JTable(recipeModel);
+        recipeTable = new JTable(recipeModel) {
+            @Override
+            public String getToolTipText(MouseEvent e) {
+                int row = rowAtPoint(e.getPoint());
+                int col = columnAtPoint(e.getPoint());
+                if (row >= 0 && col >= 0) {
+                    Object value = getValueAt(row, col);
+                    // 설명 컬럼(인덱스 7) 위에 마우스를 올리면 전체 설명을 툴팁으로 표시
+                    if (col == 7 && value != null) {
+                        return "<html><body style='width:400px;'>" + value.toString() + "</body></html>";
+                    }
+                }
+                return super.getToolTipText(e);
+            }
+        };
         recipeTable.setRowHeight(32);
         recipeTable.setFillsViewportHeight(true);
         recipeTable.setShowGrid(false);
@@ -634,6 +650,19 @@ public class InventoCookUI {
         recipeTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         recipeTable.setSelectionBackground(new Color(235, 245, 255));
         recipeTable.setSelectionForeground(Color.BLACK);
+        // 설명 컬럼이 너무 잘리지 않도록 기본 폭 조정 + 가로 스크롤 허용
+        recipeTable.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
+        TableColumnModel colModel = recipeTable.getColumnModel();
+        if (colModel.getColumnCount() >= 8) {
+            colModel.getColumn(0).setPreferredWidth(140); // 레시피명
+            colModel.getColumn(1).setPreferredWidth(80);  // 카테고리
+            colModel.getColumn(2).setPreferredWidth(80);  // 매칭률
+            colModel.getColumn(3).setPreferredWidth(90);  // 보유 재료 수
+            colModel.getColumn(4).setPreferredWidth(90);  // 필요 재료 수
+            colModel.getColumn(5).setPreferredWidth(90);  // 임박 재료 수
+            colModel.getColumn(6).setPreferredWidth(90);  // 부족 재료 수
+            colModel.getColumn(7).setPreferredWidth(400); // 설명 컬럼 넓게
+        }
 
         JScrollPane sp = new JScrollPane(recipeTable);
         sp.setBorder(BorderFactory.createLineBorder(new Color(240, 240, 240)));
@@ -956,11 +985,9 @@ public class InventoCookUI {
             form.setBorder(new EmptyBorder(10, 10, 10, 10));
 
             JTextField nameField = new JTextField(20);
-            JTextField categoryField = new JTextField(20);
+            JComboBox<String> categoryField = new JComboBox<>(new String[]{"야채", "육류", "유제품", "기타"});
             JComboBox<String> locationField = new JComboBox<>(new String[]{"냉장", "냉동", "실온"});
             JSpinner qtySpinner = new JSpinner(new SpinnerNumberModel(0, 0, 9999, 1));
-            JTextField ddayField = new JTextField("D-0", 10);
-            ddayField.setEditable(false); // D-Day는 유통기한 기반 자동 계산
             JTextField expField = new JTextField("2025-10-31", 15);
 
             form.add(new JLabel("재료명:"));
@@ -971,44 +998,12 @@ public class InventoCookUI {
             form.add(locationField);
             form.add(new JLabel("수량:"));
             form.add(qtySpinner);
-            form.add(new JLabel("D-Day (예: D-3):"));
-            form.add(ddayField);
             form.add(new JLabel("유통기한 (YYYY-MM-DD):"));
             form.add(expField);
 
-            // 유통기한 입력에 따라 D-Day 실시간 갱신
-            expField.getDocument().addDocumentListener(new DocumentListener() {
-                private void update() {
-                    String exp = expField.getText().trim();
-                    try {
-                        ddayField.setText(calculateDDay(exp));
-                    } catch (Exception ex) {
-                        ddayField.setText("D-0");
-                    }
-                }
-
-                @Override
-                public void insertUpdate(DocumentEvent e) {
-                    update();
-                }
-
-                @Override
-                public void removeUpdate(DocumentEvent e) {
-                    update();
-                }
-
-                @Override
-                public void changedUpdate(DocumentEvent e) {
-                    update();
-                }
-            });
-
-            // 스크롤 가능한 패널로 감싸기
-            JScrollPane scrollPane = new JScrollPane(form);
-            scrollPane.setPreferredSize(new Dimension(400, 250));
-
+            // 다이얼로그에 직접 form 사용 (스크롤 패널 제거)
             int res = JOptionPane.showConfirmDialog(
-                    frame, scrollPane, "재료 추가",
+                    frame, form, "재료 추가",
                     JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
             );
 
@@ -1027,11 +1022,33 @@ public class InventoCookUI {
                     return;
                 }
                 String dday = calculateDDay(exp);
+                String category = (categoryField.getSelectedItem() != null ? categoryField.getSelectedItem().toString() : "");
+                Object location = locationField.getSelectedItem();
 
+                // 1) DB에 먼저 INSERT
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+                     PreparedStatement ps = conn.prepareStatement(
+                             "INSERT INTO inventory_items (name, category, location, quantity, expiry_date) " +
+                                     "VALUES (?, ?, ?, ?, ?)"
+                     )) {
+                    ps.setString(1, name);
+                    ps.setString(2, category);
+                    ps.setString(3, String.valueOf(location));
+                    ps.setInt(4, qty);
+                    ps.setString(5, exp);
+                    ps.executeUpdate();
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(frame,
+                            "DB에 재료를 저장하는 중 오류가 발생했습니다: " + ex.getMessage(),
+                            "DB 오류", JOptionPane.ERROR_MESSAGE);
+                    ex.printStackTrace();
+                }
+
+                // 2) 테이블 모델에도 반영
                 tableModel.addRow(new Object[]{
                         name,
-                        categoryField.getText().trim(),
-                        locationField.getSelectedItem(),
+                        category,
+                        location,
                         qty,
                         dday,
                         exp
@@ -1096,7 +1113,9 @@ public class InventoCookUI {
             form.setBorder(new EmptyBorder(10, 10, 10, 10));
 
             JTextField nameField = new JTextField(curName, 20);
-            JTextField categoryField = new JTextField(curCat, 20);
+            JComboBox<String> categoryField = new JComboBox<>(new String[]{"야채", "육류", "유제품", "기타"});
+            categoryField.setEditable(false);
+            categoryField.setSelectedItem(curCat);
             JComboBox<String> locationField = new JComboBox<>(new String[]{"냉장", "냉동", "실온"});
             locationField.setSelectedItem(curLoc);
             JSpinner qtySpinner = new JSpinner(new SpinnerNumberModel(curQty, 0, 9999, 1));
@@ -1144,12 +1163,9 @@ public class InventoCookUI {
                 }
             });
 
-            // 스크롤 가능한 패널로 감싸기
-            JScrollPane scrollPane = new JScrollPane(form);
-            scrollPane.setPreferredSize(new Dimension(400, 250));
-
+            // 다이얼로그에 직접 form 사용 (스크롤 패널 제거)
             int res = JOptionPane.showConfirmDialog(
-                    frame, scrollPane, "재료 수정",
+                    frame, form, "재료 수정",
                     JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
             );
 
@@ -1168,10 +1184,38 @@ public class InventoCookUI {
                     return;
                 }
                 String dday = calculateDDay(exp);
+                String newCategory = (categoryField.getSelectedItem() != null ? categoryField.getSelectedItem().toString() : "");
+                Object newLocation = locationField.getSelectedItem();
 
+                // 1) DB UPDATE (기존 값 기준으로 1개 행 갱신)
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+                     PreparedStatement ps = conn.prepareStatement(
+                             "UPDATE inventory_items " +
+                                     "SET name = ?, category = ?, location = ?, quantity = ?, expiry_date = ? " +
+                                     "WHERE name = ? AND category = ? AND location = ? AND expiry_date = ? " +
+                                     "LIMIT 1"
+                     )) {
+                    ps.setString(1, name);
+                    ps.setString(2, newCategory);
+                    ps.setString(3, String.valueOf(newLocation));
+                    ps.setInt(4, qty);
+                    ps.setString(5, exp);
+                    ps.setString(6, curName);
+                    ps.setString(7, curCat);
+                    ps.setString(8, curLoc);
+                    ps.setString(9, curExp);
+                    ps.executeUpdate();
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(frame,
+                            "DB에서 재료를 수정하는 중 오류가 발생했습니다: " + ex.getMessage(),
+                            "DB 오류", JOptionPane.ERROR_MESSAGE);
+                    ex.printStackTrace();
+                }
+
+                // 2) 테이블 모델에도 반영
                 tableModel.setValueAt(name, r, 0);
-                tableModel.setValueAt(categoryField.getText().trim(), r, 1);
-                tableModel.setValueAt(locationField.getSelectedItem(), r, 2);
+                tableModel.setValueAt(newCategory, r, 1);
+                tableModel.setValueAt(newLocation, r, 2);
                 tableModel.setValueAt(qty, r, 3);
                 tableModel.setValueAt(dday, r, 4);
                 tableModel.setValueAt(exp, r, 5);
@@ -1228,7 +1272,37 @@ public class InventoCookUI {
                 // 내림차순으로 정렬 (뒤에서부터 삭제하여 인덱스 문제 방지)
                 Arrays.sort(modelRows);
 
-                // 삭제 실행
+                // 먼저 DB에서 삭제
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+                     PreparedStatement ps = conn.prepareStatement(
+                             "DELETE FROM inventory_items " +
+                                     "WHERE name = ? AND category = ? AND location = ? AND expiry_date = ? " +
+                                     "LIMIT 1"
+                     )) {
+
+                    for (int i = modelRows.length - 1; i >= 0; i--) {
+                        int modelRow = modelRows[i];
+                        if (modelRow >= 0 && modelRow < tableModel.getRowCount()) {
+                            String name = String.valueOf(tableModel.getValueAt(modelRow, 0));
+                            String cat = String.valueOf(tableModel.getValueAt(modelRow, 1));
+                            String loc = String.valueOf(tableModel.getValueAt(modelRow, 2));
+                            String exp = String.valueOf(tableModel.getValueAt(modelRow, 5));
+
+                            ps.setString(1, name);
+                            ps.setString(2, cat);
+                            ps.setString(3, loc);
+                            ps.setString(4, exp);
+                            ps.executeUpdate();
+                        }
+                    }
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(frame,
+                            "DB에서 재료를 삭제하는 중 오류가 발생했습니다: " + ex.getMessage(),
+                            "DB 오류", JOptionPane.ERROR_MESSAGE);
+                    ex.printStackTrace();
+                }
+
+                // 그 다음 테이블 모델에서 삭제
                 for (int i = modelRows.length - 1; i >= 0; i--) {
                     if (modelRows[i] >= 0 && modelRows[i] < tableModel.getRowCount()) {
                         tableModel.removeRow(modelRows[i]);
@@ -1392,12 +1466,13 @@ public class InventoCookUI {
 
         for (RecipeMatch m : matches) {
             String category = inferRecipeCategory(m.recipe.getName());
-            String haveInfo = m.haveCount + " / " + (m.recipe.getIngredients() != null ? m.recipe.getIngredients().size() : 0);
+            int totalCount = (m.recipe.getIngredients() != null ? m.recipe.getIngredients().size() : 0);
             recipeModel.addRow(new Object[]{
                     m.recipe.getName(),
                     category,
                     m.matchPercent,
-                    haveInfo,
+                    m.haveCount,
+                    totalCount,
                     m.imminentCount,
                     m.missingCount,
                     m.recipe.getDescription()
@@ -1537,6 +1612,64 @@ public class InventoCookUI {
             this.matchPercent = matchPercent;
             // 임박 재료와 보유 재료를 약간 가중치로 더 반영
             this.score = imminentCount * 10 + haveCount;
+        }
+    }
+
+    // MySQL에서 인벤토리 목록 로딩
+    private void loadInventoryFromDb() {
+        if (tableModel == null) return;
+        tableModel.setRowCount(0);
+
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+
+        try {
+            conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+            String sql =
+                    "SELECT name, category, location, quantity, expiry_date " +
+                            "FROM inventory_items " +
+                            "ORDER BY expiry_date ASC, name ASC";
+            ps = conn.prepareStatement(sql);
+            rs = ps.executeQuery();
+
+            while (rs.next()) {
+                String name = rs.getString("name");
+                String cat = rs.getString("category");
+                String loc = rs.getString("location");
+                int qty = rs.getInt("quantity");
+                String exp = rs.getString("expiry_date");
+                String dday = calculateDDay(exp);
+
+                tableModel.addRow(new Object[]{
+                        name,
+                        cat,
+                        loc,
+                        qty,
+                        dday,
+                        exp
+                });
+            }
+
+            // 로딩 후 D-Day 색상/뱃지/알림/레시피 추천 갱신
+            if (table != null) {
+                table.repaint();
+            }
+            refreshBadge();
+            rebuildAlertData();
+            rebuildRecipeRecommendations();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                if (rs != null) rs.close();
+            } catch (SQLException ignored) {}
+            try {
+                if (ps != null) ps.close();
+            } catch (SQLException ignored) {}
+            try {
+                if (conn != null) conn.close();
+            } catch (SQLException ignored) {}
         }
     }
 }
