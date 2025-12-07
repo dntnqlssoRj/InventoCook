@@ -54,7 +54,7 @@ public class InventoCookUI {
     // 임박(near-expiry) 기능용
     private DefaultTableModel alertModel;
     private JTable alertTable;
-    private static final int IMMINENT_DAYS = 3; // D-3 이하면 임박으로 간주
+    private int imminentDays = 3; // 설정 화면에서 조정 가능한 임박 기준일
 
     private static final Color COLOR_DDAY_SAFE = new Color(230, 248, 230);
     private static final Color COLOR_DDAY_WARNING = new Color(255, 245, 230);
@@ -73,6 +73,7 @@ public class InventoCookUI {
     private static final String CARD_INVENTORY = "inventory";
     private static final String CARD_ALERT = "alert";
     private static final String CARD_EMERGENCY = "emergency";
+    private static final String CARD_SETTINGS = "settings"; // 설정 화면 카드
 
     private DefaultTableModel recipeModel;
     private JTable recipeTable;
@@ -81,8 +82,8 @@ public class InventoCookUI {
     private List<Recipe> RECIPE_DB = new ArrayList<>();
 
     private static final String DB_URL = "jdbc:mysql://localhost:3306/inventocook?useSSL=false&serverTimezone=UTC"; // MySQL inventocook DB에 접속하기 위한 JDBC URL 설정
-    private static final String DB_USER = ""; //"본인계정";
-    private static final String DB_PASS =  ""; //"본인비밀번호";
+    private static final String DB_USER = "root"; // MySQL 접속 계정 (설정 필요)
+    private static final String DB_PASS =  "wjdgns2003@"; //"본인비밀번호";
 
     // =========================================================
     // 2. 생성자
@@ -146,7 +147,9 @@ public class InventoCookUI {
         sidebar.setBackground(Color.WHITE);
         sidebar.setBorder(new EmptyBorder(16, 12, 16, 12));
 
-        sidebar.add(menuButton("🏠  홈", true, CARD_HOME));   // 홈만 페이지 전환
+        sidebar.add(menuButton("🏠  홈", true, CARD_HOME)); // 홈 버튼
+        sidebar.add(Box.createVerticalStrut(8));
+        sidebar.add(menuButton("⚙  설정", false, CARD_SETTINGS)); // 설정 화면으로 이동
         sidebar.add(Box.createVerticalGlue());
 
         split.setLeftComponent(sidebar);
@@ -160,11 +163,13 @@ public class InventoCookUI {
         JPanel inventoryPanel = createInventoryPanel();
         JPanel alertPanel = createAlertPanel();
         JPanel emergencyPanel = createEmergencyPanel();
+        JPanel settingsPanel = createSettingsPanel(); // 설정 화면
 
         mainContainer.add(homePanel, CARD_HOME);
         mainContainer.add(inventoryPanel, CARD_INVENTORY);
         mainContainer.add(alertPanel, CARD_ALERT);
         mainContainer.add(emergencyPanel, CARD_EMERGENCY);
+        mainContainer.add(settingsPanel, CARD_SETTINGS);
 
         // 기본은 홈 화면
         cardLayout.show(mainContainer, CARD_HOME);
@@ -517,7 +522,7 @@ public class InventoCookUI {
         JPanel titleBar = new JPanel(new BorderLayout());
         titleBar.setOpaque(false);
         JLabel title =
-                new JLabel("<html><span style='font-size:12pt;font-weight:600;'>유통기한 임박 알림</span><span style='font-size:10pt;color:#888;'>  (기준: D-" + IMMINENT_DAYS + " 이하)</span></html>");
+                new JLabel("<html><span style='font-size:12pt;font-weight:600;'>유통기한 임박 알림</span><span style='font-size:10pt;color:#888;'>  (기준: D-" + imminentDays + " 이하)</span></html>");
         title.setBorder(new EmptyBorder(0, 0, 8, 0));
         titleBar.add(title, BorderLayout.WEST);
 
@@ -971,7 +976,7 @@ public class InventoCookUI {
     // 특정 유통기한이 임박(D-IMMINENT_DAYS 이하) 또는 이미 경과했는지 여부 판단
     private boolean isImminentOrExpired(String expiryStr) {
         long d = daysUntil(expiryStr);
-        return d <= IMMINENT_DAYS; // d<0(경과)도 포함
+        return d <= imminentDays; // d<0(경과)도 포함
     }
 
     // 메인 인벤토리 테이블에서 임박/경과 항목을 읽어와 알림 테이블을 갱신
@@ -1802,5 +1807,79 @@ public class InventoCookUI {
                 if (conn != null) conn.close();
             } catch (SQLException ignored) {}
         }
+    }
+
+    // =========================================================
+    // 설정 화면
+    // - 임박 기준일 조정
+    // - 상단 뱃지 표시 여부 설정
+    // =========================================================
+    private JPanel createSettingsPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(new EmptyBorder(12, 16, 12, 16));
+        panel.setBackground(Color.WHITE);
+
+        // 제목 + 뒤로
+        JLabel title = new JLabel(
+            "<html><span style='font-size:12pt;font-weight:600;'>설정</span>" +
+            "<span style='font-size:10pt;color:#888;'>  (알림 기준 / 표시 옵션)</span></html>"
+        );
+        title.setBorder(new EmptyBorder(0, 0, 8, 0));
+
+        JButton backBtn = new JButton("← 뒤로");
+        styleFlatButton(backBtn);
+        backBtn.addActionListener(e -> goBack());
+
+        JPanel topLine = new JPanel(new BorderLayout());
+        topLine.setOpaque(false);
+        topLine.add(title, BorderLayout.WEST);
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        right.setOpaque(false);
+        right.add(backBtn);
+        topLine.add(right, BorderLayout.EAST);
+
+        panel.add(topLine, BorderLayout.NORTH);
+
+        // 실제 설정 폼
+        JPanel form = new JPanel(new GridLayout(0, 2, 8, 8));
+        form.setOpaque(false);
+        form.setBorder(new EmptyBorder(8, 0, 8, 0));
+
+        // 임박 기준일 설정
+        JSpinner imminentSpinner = new JSpinner(
+            new SpinnerNumberModel(imminentDays, 1, 14, 1)
+        );
+        form.add(new JLabel("임박 기준일(D-기준):"));
+        form.add(imminentSpinner);
+
+        // 뱃지 표시 여부
+        JCheckBox badgeCheck = new JCheckBox("상단 임박 뱃지 표시");
+        badgeCheck.setOpaque(false);
+        badgeCheck.setSelected(badgeLabel.isVisible());
+        form.add(new JLabel("알림 뱃지:"));
+        form.add(badgeCheck);
+
+        panel.add(form, BorderLayout.CENTER);
+
+        // 적용 버튼
+        JButton applyBtn = new JButton("적용");
+        styleFlatButton(applyBtn);
+
+        applyBtn.addActionListener(e -> {
+            imminentDays = (Integer) imminentSpinner.getValue(); // D-기준 변경
+            recalculateAllDays(); // 알림/레시피 추천/D-Day 다시 계산
+
+            badgeLabel.setVisible(badgeCheck.isSelected()); // 뱃지 표시여부 반영
+
+            JOptionPane.showMessageDialog(frame, "설정이 적용되었습니다.",
+                    "설정", JOptionPane.INFORMATION_MESSAGE);
+        });
+
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 8));
+        bottom.setOpaque(false);
+        bottom.add(applyBtn);
+        panel.add(bottom, BorderLayout.SOUTH);
+
+        return panel;
     }
 }
