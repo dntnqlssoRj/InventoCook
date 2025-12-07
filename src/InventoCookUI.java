@@ -140,15 +140,13 @@ public class InventoCookUI {
         split.setDividerSize(1);
         split.setContinuousLayout(true);
 
-        // Sidebar (홈 + 설정만)
+        // Sidebar (홈만)
         JPanel sidebar = new JPanel();
         sidebar.setLayout(new BoxLayout(sidebar, BoxLayout.Y_AXIS));
         sidebar.setBackground(Color.WHITE);
         sidebar.setBorder(new EmptyBorder(16, 12, 16, 12));
 
         sidebar.add(menuButton("🏠  홈", true, CARD_HOME));   // 홈만 페이지 전환
-        sidebar.add(Box.createVerticalStrut(8));
-        sidebar.add(menuButton("⚙  설정", false));            // 설정은 남겨두되 아직 페이지 연결 X
         sidebar.add(Box.createVerticalGlue());
 
         split.setLeftComponent(sidebar);
