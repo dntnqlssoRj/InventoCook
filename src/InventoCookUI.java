@@ -81,8 +81,8 @@ public class InventoCookUI {
     private List<Recipe> RECIPE_DB = new ArrayList<>();
 
     private static final String DB_URL = "jdbc:mysql://localhost:3306/inventocook?useSSL=false&serverTimezone=UTC";
-    private static final String DB_USER = "root"; //"본인계정";
-    private static final String DB_PASS =  "wjdgns2003@"; //"본인비밀번호";
+    private static final String DB_USER = ""; //"본인계정";
+    private static final String DB_PASS =  ""; //"본인비밀번호";
 
     // =========================================================
     // 2. 생성자
