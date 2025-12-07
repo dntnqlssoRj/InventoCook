@@ -1,3 +1,12 @@
+/**
+ * InventoCook 메인 UI 클래스
+ *
+ * - 냉장고 식재료 인벤토리 관리
+ * - 유통기한 임박 알림
+ * - 긴급 추천 메뉴(레시피 매칭) 화면을 하나의 프레임에서 카드 레이아웃으로 관리
+ *
+ * JAVA 응용프로젝트 팀 프로그램
+ */
 import inventocook.model.Recipe;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -31,6 +40,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 
 public class InventoCookUI {
+    // =========================================================
+    // 1. 화면 구성에 사용되는 필드 정의
+    //    - 메인 프레임, 카드 레이아웃, 테이블/모델, 뱃지 등
+    // =========================================================
     private JFrame frame;
     private JTable table;
     private DefaultTableModel tableModel;
@@ -68,15 +81,26 @@ public class InventoCookUI {
     private List<Recipe> RECIPE_DB = new ArrayList<>();
 
     private static final String DB_URL = "jdbc:mysql://localhost:3306/inventocook?useSSL=false&serverTimezone=UTC";
-    private static final String DB_USER =   //"본인계정";
-    private static final String DB_PASS =   //"본인비밀번호";
+    private static final String DB_USER = "root"; //"본인계정";
+    private static final String DB_PASS =  "wjdgns2003@"; //"본인비밀번호";
 
+    // =========================================================
+    // 2. 생성자
+    //    - 프로그램 시작 시 DB에서 레시피를 먼저 로드
+    //    - 이후 전체 UI 컴포넌트 초기화
+    // =========================================================
     public InventoCookUI() {
         // 레시피를 MySQL DB에서 먼저 로드
         loadRecipesFromDb();
         initUI();
     }
 
+    // =========================================================
+    // 3. 메인 프레임 및 상단/사이드바/카드 레이아웃 초기화
+    //    - 상단 헤더(타이틀 + 임박 뱃지)
+    //    - 좌측 사이드바(홈, 설정)
+    //    - 우측 메인 카드(홈/인벤토리/알람/긴급추천)
+    // =========================================================
     private void initUI() {
         // Frame
         frame = new JFrame("InventoCook");
@@ -155,6 +179,11 @@ public class InventoCookUI {
     }
 
     // 홈 화면
+    // =========================================================
+    // 4. 홈 화면 구성
+    //    - 프로젝트 소개 영역 + 3개의 기능 카드
+    //    - 각 카드 클릭 시 해당 기능 화면으로 이동
+    // =========================================================
     private JPanel createHomePanel() {
         JPanel home = new JPanel(new BorderLayout());
         home.setBorder(new EmptyBorder(12, 16, 12, 16));
@@ -181,6 +210,9 @@ public class InventoCookUI {
     }
 
     // 홈 카드 + 클릭 시 카드 전환
+    // 홈 화면의 개별 카드 컴포넌트 생성
+    // - 제목/설명 표시
+    // - 마우스 클릭 시 showCard(cardName) 호출
     private JPanel makeHomeCard(String title, String desc, String cardName) {
         JPanel card = new JPanel(new BorderLayout());
         card.setBorder(new EmptyBorder(12, 12, 12, 12));
@@ -216,6 +248,14 @@ public class InventoCookUI {
     }
 
     // 재고관리 화면
+    // =========================================================
+    // 5. 인벤토리(식재료) 관리 화면
+    //    - 검색/필터/정렬 UI
+    //    - 테이블(JTable + DefaultTableModel)
+    //    - 재료 추가/수정/삭제 버튼
+    //    - 수량 조정 스피너 + 적용 버튼
+    //    - DB(inventory_items)와 연동
+    // =========================================================
     private JPanel createInventoryPanel() {
         JPanel main = new JPanel(new BorderLayout());
         main.setBorder(new EmptyBorder(12, 16, 12, 16));
@@ -430,6 +470,9 @@ public class InventoCookUI {
     }
 
     // 인벤토리 검색/필터 공통 적용
+    // 인벤토리 테이블 검색/필터 공통 로직
+    // - 재료명 부분 검색
+    // - 카테고리, 보관 위치 필터
     private void applyFilters(TableRowSorter<DefaultTableModel> sorter,
                               JTextField searchField,
                               JComboBox<String> categoryFilter,
@@ -462,6 +505,11 @@ public class InventoCookUI {
     }
 
     // 유통기한 임박/경과 알림 화면
+    // =========================================================
+    // 6. 유통기한 임박/경과 알림 화면
+    //    - 메인 인벤토리 데이터 중 D-IMMINENT_DAYS 이하만 별도 테이블로 표시
+    //    - 새로고침 버튼으로 재계산
+    // =========================================================
     private JPanel createAlertPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(new EmptyBorder(12, 16, 12, 16));
@@ -554,6 +602,12 @@ public class InventoCookUI {
     }
 
     // 긴급 추천 메뉴 화면
+    // =========================================================
+    // 7. 긴급 추천 메뉴 화면
+    //    - 레시피 DB와 현재 인벤토리를 비교하여 매칭률 계산
+    //    - 임박 재료를 많이 사용하는 레시피를 우선 정렬
+    //    - 상단에 최상위 추천 1개를 요약 표시
+    // =========================================================
     private JPanel createEmergencyPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(new EmptyBorder(12, 16, 12, 16));
@@ -767,6 +821,11 @@ public class InventoCookUI {
     }
 
     // 사이드바 메뉴 버튼
+    // =========================================================
+    // 8. 사이드바 메뉴 버튼 생성 유틸
+    //    - 선택된 메뉴는 좌측에 라인 표시
+    //    - 카드 이름이 연결된 메뉴는 클릭 시 showCard 호출
+    // =========================================================
     private JPanel menuButton(String text, boolean selected) {
         return menuButton(text, selected, null);
     }
@@ -806,6 +865,8 @@ public class InventoCookUI {
     }
 
     // 카드 전환 공통 처리: 이전 카드 히스토리 스택에 저장
+    // 카드 전환 공통 처리
+    // - 현재 카드 이름을 스택에 저장하여 뒤로가기 지원
     private void showCard(String cardName) {
         if (cardLayout == null || mainContainer == null || cardName == null) return;
         if (currentCard != null && !currentCard.equals(cardName)) {
@@ -816,6 +877,8 @@ public class InventoCookUI {
     }
 
     // 뒤로가기: 스택에서 이전 카드 꺼내 전환 (없으면 홈)
+    // 뒤로가기 버튼 처리
+    // - 스택이 비어 있으면 홈 화면으로 이동
     private void goBack() {
         if (cardLayout == null || mainContainer == null) return;
         if (navStack.isEmpty()) {
@@ -829,6 +892,8 @@ public class InventoCookUI {
     }
 
     // 버튼 스타일
+    // 공통 버튼 스타일 설정
+    // - 플랫한 흰색 버튼 + 마우스 커서 변경
     private void styleFlatButton(JButton btn) {
         btn.setFocusPainted(false);
         btn.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
@@ -837,6 +902,10 @@ public class InventoCookUI {
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
     }
 
+    // D-Day 문자열(D-3, D+1 등)에 따라 테이블 행 배경색 결정
+    // - D-3 이상: 안전(초록 계열)
+    // - D-2, D-1: 경고(노랑 계열)
+    // - 오늘 또는 이미 경과: 만료(빨강 계열)
     private Color resolveDDayColor(String dday) {
         if (dday == null) return Color.WHITE;
         String normalized = dday.trim().toUpperCase();
@@ -862,6 +931,9 @@ public class InventoCookUI {
         return Color.WHITE;
     }
 
+    // 전체 인벤토리의 D-Day를 현재 날짜 기준으로 다시 계산
+    // - 테이블 D-Day 컬럼 갱신
+    // - 알림/레시피 추천 데이터도 함께 재계산
     private void recalculateAllDays() {
         if (tableModel == null) return;
         for (int i = 0; i < tableModel.getRowCount(); i++) {
@@ -884,6 +956,8 @@ public class InventoCookUI {
     }
 
     // expiryStr(YYYY-MM-DD)까지 남은 일수 (오늘 기준, 음수면 경과)
+    // 유통기한 문자열(YYYY-MM-DD)까지 남은 일수를 계산
+    // - 오늘 기준, 음수면 이미 경과
     private long daysUntil(String expiryStr) {
         if (expiryStr == null || expiryStr.isBlank()) return Long.MAX_VALUE;
         try {
@@ -896,12 +970,15 @@ public class InventoCookUI {
     }
 
     // 임박(D-IMMINENT_DAYS 이하) 또는 이미 경과한 항목인지 여부
+    // 특정 유통기한이 임박(D-IMMINENT_DAYS 이하) 또는 이미 경과했는지 여부 판단
     private boolean isImminentOrExpired(String expiryStr) {
         long d = daysUntil(expiryStr);
         return d <= IMMINENT_DAYS; // d<0(경과)도 포함
     }
 
     // 메인 인벤토리 테이블에서 임박/경과 항목을 읽어와 알림 테이블을 갱신
+    // 메인 인벤토리 테이블을 기반으로
+    // - 임박/경과 항목만 골라 알림 테이블(alertModel)에 다시 채움
     private void rebuildAlertData() {
         if (alertModel == null) return;
         alertModel.setRowCount(0);
@@ -935,6 +1012,7 @@ public class InventoCookUI {
         }
     }
 
+    // 하단 수량 스피너의 값을 선택된 인벤토리 행에 반영
     private void applyQuantityChange() {
         if (quantitySpinner == null || table == null) return;
         int viewRow = table.getSelectedRow();
@@ -948,6 +1026,8 @@ public class InventoCookUI {
         tableModel.setValueAt(qty, modelRow, 3);
     }
 
+    // 인벤토리 테이블 선택 상태에 따라
+    // - 수량 스피너와 적용 버튼 활성/비활성 및 현재 값 동기화
     private void syncQuantityEditorState() {
         if (quantitySpinner == null || quantityApplyButton == null || table == null) return;
         int viewRow = table.getSelectedRow();
@@ -974,6 +1054,11 @@ public class InventoCookUI {
     }
 
     // CRUD: 추가
+    // =========================================================
+    // 9. CRUD 동작 - 추가
+    //    - 입력 폼(JOptionPane)으로 새 식재료 정보 입력
+    //    - DB(inventory_items)에 INSERT 후 테이블 모델에 반영
+    // =========================================================
     private void onAdd() {
         if (tableModel == null || frame == null) {
             JOptionPane.showMessageDialog(frame, "테이블이 초기화되지 않았습니다.");
@@ -1072,6 +1157,10 @@ public class InventoCookUI {
     }
 
     // CRUD: 수정
+    // CRUD 동작 - 수정
+    // - 선택한 행의 현재 값을 기반으로 편집 폼 표시
+    // - 유통기한 변경 시 D-Day 실시간 계산
+    // - DB UPDATE 후 테이블 모델 갱신
     private void onEdit() {
         if (table == null || tableModel == null || frame == null) {
             JOptionPane.showMessageDialog(frame, "테이블이 초기화되지 않았습니다.");
@@ -1239,6 +1328,9 @@ public class InventoCookUI {
     }
 
     // CRUD: 삭제
+    // CRUD 동작 - 삭제
+    // - 다중 선택 가능
+    // - 선택된 각 행에 대해 DB DELETE 수행 후 테이블에서 제거
     private void onDelete() {
         if (table == null || tableModel == null || frame == null) {
             JOptionPane.showMessageDialog(frame, "테이블이 초기화되지 않았습니다.");
@@ -1332,6 +1424,8 @@ public class InventoCookUI {
     }
 
     // 뱃지 갱신: 임박/경과 재료 개수 표시
+    // 상단 경고 뱃지(⚠ 숫자) 갱신
+    // - 현재 인벤토리에서 임박/경과 상태인 재료 개수를 계산하여 표시
     private void refreshBadge() {
         if (tableModel == null || badgeLabel == null) return;
         try {
@@ -1348,6 +1442,9 @@ public class InventoCookUI {
         }
     }
 
+    // 프로그램 진입점
+    // - 시스템 기본 Look&Feel 적용
+    // - Swing EDT에서 InventoCookUI 인스턴스 생성
     public static void main(String[] args) {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
@@ -1357,6 +1454,10 @@ public class InventoCookUI {
     }
 
     // 유통기한(YYYY-MM-DD) 문자열을 받아 D-Day 문자열(D-?, D+?, D-0)로 계산
+    // 유통기한 문자열을 받아 D-Day 포맷 문자열로 변환
+    // - 미래: D-n (n일 남음)
+    // - 오늘: D-0
+    // - 과거: D+n (n일 지남)
     private String calculateDDay(String expiryStr) {
         if (expiryStr == null || expiryStr.isBlank()) return "D-0";
         LocalDate today = LocalDate.now(); // 기준: 오늘
@@ -1368,6 +1469,15 @@ public class InventoCookUI {
     }
 
     // 현재 인벤토리 상태를 기반으로 레시피 추천 목록을 다시 계산
+    // =========================================================
+    // 10. 레시피 추천 로직
+    //     - RECIPE_DB와 인벤토리 데이터를 비교하여
+    //       * 보유 재료 수
+    //       * 임박 재료 수
+    //       * 부족 재료 수
+    //       * 매칭률(%)을 계산
+    //     - 매칭률, 임박 재료 수 기준으로 정렬하여 테이블 채움
+    // =========================================================
     private void rebuildRecipeRecommendations() {
         if (recipeModel == null) return;
         recipeModel.setRowCount(0);
@@ -1481,6 +1591,8 @@ public class InventoCookUI {
     }
 
     // 레시피 이름 기반 간단 카테고리 분류
+    // 레시피 이름에 포함된 키워드로 대략적인 카테고리 분류
+    // - 예: "볶음밥" -> 볶음밥/덮밥, "우동" -> 면/파스타
     private String inferRecipeCategory(String recipeName) {
         if (recipeName == null) return "기타";
         String n = recipeName;
@@ -1501,6 +1613,8 @@ public class InventoCookUI {
     }
 
     // 인벤토리에 해당 재료가 있는지 단순 체크
+    // 현재 인벤토리에 주어진 재료명이 존재하는지 간단히 확인
+    // - 수량이 1개 이상인 경우만 보유한 것으로 간주
     private boolean hasIngredient(String ingredientName) {
         if (tableModel == null || ingredientName == null) return false;
         for (int i = 0; i < tableModel.getRowCount(); i++) {
@@ -1524,6 +1638,11 @@ public class InventoCookUI {
     }
 
     // MySQL에서 레시피 + 재료 목록을 로딩
+    // =========================================================
+    // 11. MySQL에서 레시피 목록 로딩
+    //     - recipes, recipe_ingredients, ingredients 테이블 조인
+    //     - 같은 레시피 이름에 대해 재료 목록을 하나의 Recipe 객체로 구성
+    // =========================================================
     private void loadRecipesFromDb() {
         RECIPE_DB.clear();
         Connection conn = null;
@@ -1586,6 +1705,8 @@ public class InventoCookUI {
     }
 
     // DB 로딩용 임시 레시피 구조체
+    // DB 로딩 시 사용할 임시 구조체
+    // - 같은 레시피 이름에 대한 설명/재료 리스트 묶음
     private static class TempRecipe {
         final String description;
         final List<String> ingredients = new ArrayList<>();
@@ -1596,6 +1717,12 @@ public class InventoCookUI {
     }
 
     // 레시피와 매칭 점수
+    // 레시피와 인벤토리 매칭 결과를 담는 구조체
+    // - haveCount      : 보유 재료 수
+    // - imminentCount  : 임박 재료 수
+    // - missingCount   : 부족 재료 수
+    // - matchPercent   : 전체 재료 대비 보유 비율(%)
+    // - score          : 정렬용 점수(임박*10 + 보유 수)
     private static class RecipeMatch {
         final Recipe recipe;
         final int haveCount;
@@ -1616,6 +1743,12 @@ public class InventoCookUI {
     }
 
     // MySQL에서 인벤토리 목록 로딩
+    // =========================================================
+    // 12. MySQL에서 인벤토리 목록 로딩
+    //     - inventory_items 테이블에서 전체 재료 조회
+    //     - D-Day 계산 후 테이블 모델에 채움
+    //     - 뱃지/알림/레시피 추천도 함께 갱신
+    // =========================================================
     private void loadInventoryFromDb() {
         if (tableModel == null) return;
         tableModel.setRowCount(0);
